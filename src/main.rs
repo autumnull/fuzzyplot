@@ -2,7 +2,9 @@ use structopt::StructOpt;
 use num::complex::Complex;
 use std::f64::consts::TAU;
 use image::{RgbImage, Rgb};
+use anyhow::{Context, Result};
 
+// TODO add GRAPH_BOUNDS, DRAW_AXES, PROP_EQU to CLI
 const GRAPH_BOUNDS: Bounds = Bounds((-2.0, -2.0), (2.0, 2.0));
 const THICK_CONST: f64 = (GRAPH_BOUNDS.1.0 - GRAPH_BOUNDS.0.0)
     * (GRAPH_BOUNDS.1.1 - GRAPH_BOUNDS.0.1);
@@ -16,7 +18,7 @@ const PROP_EQU: bool = true;
 /// outputs a fuzzy-plotted graph image of a given equation
 #[derive(StructOpt)]
 struct Cli {
-    /// filename of the new image (without the extension)
+    /// filename of the new image. must be .png or .jp(e)g
     #[structopt(parse(from_os_str))]
     filename: std::path::PathBuf,
     /// image width
@@ -35,12 +37,14 @@ fn parse_height(input: &str) -> Result<u32, std::num::ParseIntError> {
     }
 }
 
+// TODO make more descriptive
 #[derive(Debug)]
 struct Bounds (
     (f64, f64),
     (f64, f64),
 );
 
+// TODO make into parsed equations
 #[allow(unused_variables)]
 fn f_l(x: Complex<f64>, y: Complex<f64>, r: f64, t: f64) -> Complex<f64> {
     (x.powi(2) + y.powi(2) - 1.0).powi(3)
@@ -51,6 +55,7 @@ fn f_r(x: Complex<f64>, y: Complex<f64>, r: f64, t: f64) -> Complex<f64>{
     x.powi(2)*y.powi(3)
 }
 
+// TODO make these functions take one argument
 fn diff(x: Complex<f64>, y: Complex<f64>) -> f64 {
     let r = (x.re.powi(2) + y.re.powi(2)).sqrt();
     let theta = y.re.atan2(x.re) % TAU;
@@ -81,15 +86,13 @@ fn transform(p: (f64,f64), c0: &Bounds, c1: &Bounds) -> (f64, f64) {
     )
 }
 
-fn main() {
+fn main() -> Result<()> {
     let args = Cli::from_args();
     let (width, height) = if args.height == 0 {
             (args.width, args.width)
         } else {
             (args.width, args.height)
         };
-    let mut filename = args.filename.clone();
-    filename.set_extension("png");
     
     let mut img = RgbImage::new(width, height);
     
@@ -100,6 +103,7 @@ fn main() {
         for y in 0..height {
             let (graph_x, graph_y) = transform((x as f64, y as f64), &img_corners, &graph_corners);
             let diff: u8 = diff(Complex::new(graph_x, 0.0), Complex::new(graph_y, 0.0)) as u8;
+            // TODO: make color immutable
             let mut color = [255, 255-diff, 255-diff];
             if DRAW_AXES {
                 let axisness = axis_diff(graph_x, graph_y) + grid_diff(graph_x, graph_y);
@@ -110,5 +114,9 @@ fn main() {
             img.put_pixel(x, y, Rgb(color));
         }
     }
-    img.save(filename).unwrap();
+    img.save(&args.filename)
+        .with_context(
+            || format!("Couldn't save file '{}'", args.filename.display())
+        )?;
+    Ok(())
 }
