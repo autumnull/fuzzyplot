@@ -1,16 +1,39 @@
+use structopt::StructOpt;
 use num::complex::Complex;
-use std::env;
 use std::f64::consts::TAU;
 use image::{RgbImage, Rgb};
 
 const GRAPH_BOUNDS: Bounds = Bounds((-2.0, -2.0), (2.0, 2.0));
-const THICK_CONST: f64 = (GRAPH_BOUNDS.1.0 - GRAPH_BOUNDS.0.0)*(GRAPH_BOUNDS.1.1 - GRAPH_BOUNDS.0.1);
+const THICK_CONST: f64 = (GRAPH_BOUNDS.1.0 - GRAPH_BOUNDS.0.0)
+    * (GRAPH_BOUNDS.1.1 - GRAPH_BOUNDS.0.1);
 const ACCURACY_CONST: f64 = (1 << 7) as f64;
 const AXIS_CONST: f64 = 0.0001;
 const GRID_CONST: f64 = 0.1;
 const GRID_SIZE: f64 = 1.0;
 const DRAW_AXES: bool = true;
 const PROP_EQU: bool = true;
+
+/// outputs a fuzzy-plotted graph image of a given equation
+#[derive(StructOpt)]
+struct Cli {
+    /// filename of the new image (without the extension)
+    #[structopt(parse(from_os_str))]
+    filename: std::path::PathBuf,
+    /// image width
+    #[structopt(default_value = "800")]
+    width: u32,
+    /// image height
+    #[structopt(default_value = "width", parse(try_from_str = parse_height))]
+    height: u32,
+}
+
+fn parse_height(input: &str) -> Result<u32, std::num::ParseIntError> {
+    if input == "width" {
+        Ok(0)
+    } else {
+        std::str::FromStr::from_str(input)
+    }
+}
 
 #[derive(Debug)]
 struct Bounds (
@@ -51,27 +74,6 @@ fn axis_diff(x: f64, y: f64) -> f64 {
     (x.powi(-2) + y.powi(-2)) * THICK_CONST * AXIS_CONST
 }
 
-fn parse_args(args: &Vec<String>) -> Result<(&str, u32, u32), &str> {
-    let n_args = args.len();
-    if n_args == 2 {
-        Ok((&args[1], 800u32, 800u32))
-    } else if n_args == 3 {
-        if let Ok(size) = args[2].parse::<u32>() {
-            Ok((&args[1], size, size))
-        } else {
-            Err("size must be an integer")
-        }
-    } else if n_args == 4 {
-        if let (Ok(width), Ok(height)) = (args[2].parse::<u32>(), args[3].parse::<u32>()) {
-            Ok((&args[1], width, height))
-        } else {
-            Err("dimensions must be integers")
-        }
-    } else {
-        Err("Usage: fuzzyplot <filename> [size [height]]")
-    }
-}
-
 fn transform(p: (f64,f64), c0: &Bounds, c1: &Bounds) -> (f64, f64) {
     (
         (p.0 - c0.0.0)/(c0.1.0 - c0.0.0)*(c1.1.0 - c1.0.0) + c1.0.0,
@@ -80,16 +82,17 @@ fn transform(p: (f64,f64), c0: &Bounds, c1: &Bounds) -> (f64, f64) {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let (filename, width, height) = match parse_args(&args) {
-        Ok((f, w, h)) => (f, w, h),
-        Err(s) => {
-            println!("{}", s);
-            return;
-        },
-    };
+    let args = Cli::from_args();
+    let (width, height) = if args.height == 0 {
+            (args.width, args.width)
+        } else {
+            (args.width, args.height)
+        };
+    let mut filename = args.filename.clone();
+    filename.set_extension("png");
+    
     let mut img = RgbImage::new(width, height);
-
+    
     let graph_corners = GRAPH_BOUNDS;
     let img_corners = Bounds((0.0, height as f64), (width as f64, 0.0));
     
