@@ -137,7 +137,9 @@ fn main() -> Result<()> {
     
     if args.equ_strings.len() > 3 {
         return Err(anyhow!("Maximum of 3 equations allowed"));
-    };
+    } else if args.equ_strings.len() == 0 {
+        return Err(anyhow!("Please provide at least one equation"));
+    }
     
     let (width, height) = if args.height == 0 {
         (args.width, args.width)
@@ -151,11 +153,12 @@ fn main() -> Result<()> {
         w: width as f64,
         h: height as f64,
     };
+    let aspect_ratio = (width / height) as f64;
     let graph_rect_r = 2.0.pow(-args.zoom);
     let graph_rect = Rect{
-        x: -graph_rect_r,
+        x: -graph_rect_r * aspect_ratio,
         y: -graph_rect_r,
-        w: graph_rect_r * 2.0,
+        w: graph_rect_r * 2.0 * aspect_ratio,
         h: graph_rect_r * 2.0,
     };
     let params = Params {
@@ -172,7 +175,7 @@ fn main() -> Result<()> {
         let (lhs, rhs) = if split_equ.len() == 2 {
             (split_equ[0], split_equ[1])
         } else {
-            return Err(anyhow!("Equation should have 1 '=' sign"));
+            return Err(anyhow!("Equations should have 1 '=' sign"));
         };
         // TODO handle errors more nicely
         let lhs_expr = mexprp::Expression::parse_ctx(lhs, context.clone())
