@@ -85,18 +85,9 @@ impl Rect {
     }
 }
 
-fn diff(p: &Point, plot: &Plot, params: &Params) -> f64 {
-    let x = Complex::with_val(53, (p.x, 0.0));
-    let y = Complex::with_val(53, (p.y, 0.0));
-    let r = Complex::with_val(53, ((p.x.powi(2) + p.y.powi(2)).sqrt(), 0.0));
-    let t = Complex::with_val(53, (p.y.atan2(p.x) % TAU, 0.0));
-    let mut context = mexprp::Context::new();
-    context.set_var("x", x);
-    context.set_var("y", y);
-    context.set_var("r", r);
-    context.set_var("t", t);
-    let lhs = plot.lhs_expr.eval_ctx(&context).unwrap().to_vec()[0].clone();
-    let rhs = plot.rhs_expr.eval_ctx(&context).unwrap().to_vec()[0].clone();
+fn diff(context: &mexprp::Context<Complex>, plot: &Plot, params: &Params) -> f64 {
+    let lhs = plot.lhs_expr.eval_ctx(context).unwrap().unwrap_single();
+    let rhs = plot.rhs_expr.eval_ctx(context).unwrap().unwrap_single();
     let d = if params.plain_diff {
         (lhs-rhs).norm().real().to_f64()
     } else {
@@ -117,7 +108,12 @@ fn grid_diff(p: &Point, params: &Params) -> f64 {
     (dx.powi(-2) + dy.powi(-2)) * params.thickness * AXIS_CONST * GRID_CONST
 }
 
-fn make_context() -> mexprp::Context<Complex> {
+fn make_context(p: Point) -> mexprp::Context<Complex> {
+    let x = Complex::with_val(53, (p.x, 0.0));
+    let y = Complex::with_val(53, (p.y, 0.0));
+    let r = Complex::with_val(53, ((p.x.powi(2) + p.y.powi(2)).sqrt(), 0.0));
+    let t = Complex::with_val(53, (p.y.atan2(p.x) % TAU, 0.0));
+    
     // set to only return one sqrt() result
     let mut context = mexprp::Context::new();
     context.cfg = mexprp::Config {
@@ -125,12 +121,10 @@ fn make_context() -> mexprp::Context<Complex> {
         precision: 53,
         sqrt_both: false,
     };
-    // initialise variables to 0.
-    let init = Complex::with_val(53, (0.0, 0.0));
-    context.set_var("x", init.clone());
-    context.set_var("y", init.clone());
-    context.set_var("r", init.clone());
-    context.set_var("t", init);
+    context.set_var("x", x);
+    context.set_var("y", y);
+    context.set_var("r", r);
+    context.set_var("t", t);
     context
 }
 
@@ -169,7 +163,7 @@ fn main() -> Result<()> {
         thickness: graph_rect.w * graph_rect.h,
     };
     
-    let context = make_context();
+    let context = make_context(Point{x:0.0, y:0.0});
     
     let mut plots: Vec<Plot> = Vec::new();
     for (i, equ) in args.equ_strings.iter().enumerate() {
@@ -193,8 +187,12 @@ fn main() -> Result<()> {
     
     let mut img = RgbImage::new(width, height);
     
+    let pb = indicatif::ProgressBar::new((height * width) as u64);
+    pb.set_draw_rate(3);
+    
+    // TODO multithreading
     println!("generating image...");
-    for (x, y, pixel) in img.enumerate_pixels_mut().progress() {
+    for (x, y, pixel) in img.enumerate_pixels_mut().progress_with(pb) {
         let img_point = Point{x: x as f64, y: (height-1 - y) as f64};
         let graph_point = img_rect.map_point(&img_point, &graph_rect);
         
@@ -206,10 +204,10 @@ fn main() -> Result<()> {
                 pixel[channel] -= (axisness as u8).min(pixel[channel]);
             }
         };
-        
+        let context = make_context(graph_point);
         for plot in plots.iter() {
             let diff = diff(
-                &graph_point,
+                &context,
                 &plot,
                 &params) as u8;
             for channel in 0..3 {
