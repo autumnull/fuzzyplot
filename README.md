@@ -2,12 +2,11 @@
 
 ### A fuzzier graph plotting method
 
-`fuzzyplot "(x^2 + y^2 - 1)^3 = x^2 y^3" --axisless`
+`fuzzyplot "r=1-sin(t)" "r=1/(1-sin(t))" "r=1" -Ap -z -2`
 
-![](images/heart.png)
+![](images/circle_inversion.png)
 
-![](https://render.githubusercontent.com/render/math?math=%7B%28x%5E2%20%2B%20y%5E2%20-%201%29%7D%5E3%20%3D%20x%5E2y%5E3)
-
+![](https://render.githubusercontent.com/render/math?math=%5Cbegin%7Bcases%7D%0Ar%20%3D%201-%5Csin%7B%5Ctheta%7D%5C%5C%0Ar%20%3D%20%7B%281-%5Csin%7B%5Ctheta%7D%29%7D%5E%7B-1%7D%5C%5C%0Ar%20%3D%201%5C%5C%0A%5Cend%7Bcases%7D)
 
 #### How does it work ?
 
@@ -22,9 +21,9 @@
 
 Axes can be turned off with the `-A/--axisless` flag
 
-`fuzzyplot "(x^2 + y^2 - 1)^3 = x^2 y^3"`
+`fuzzyplot "(x^2 + y^2 - 1)^3 = x^2 y^3 --axisless"`
 
-![](images/heart_axes.png)
+![](images/heart.png)
 
 ![](https://render.githubusercontent.com/render/math?math=%7B%28x%5E2%20%2B%20y%5E2%20-%201%29%7D%5E3%20%3D%20x%5E2y%5E3)
 

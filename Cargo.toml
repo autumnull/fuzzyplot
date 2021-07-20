@@ -1,6 +1,6 @@
 [package]
 name = "fuzzyplot"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Autumn! <autumnull@protonmail.com>"]
 edition = "2018"
 
@@ -10,6 +10,7 @@ edition = "2018"
 anyhow = "1.0.42"
 clap = "2.32.0"
 image = "0.23.14"
+indicatif = "0.16.2"
 mexprp = "0.3.0"
 rug = "1.12.0"
 structopt = "0.3.22"
