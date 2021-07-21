@@ -49,4 +49,12 @@ By default, `fuzzyplot` divides the difference in the equation by the magnitude 
 
 ![](images/cardioid.png)
 
-![](https://render.githubusercontent.com/render/math?math=r%3D%5Cfrac%7B3%7D%7B2%7D%281-sin%28%5Ctheta%29%29)
+![](https://render.githubusercontent.com/render/math?math=r%3D%5Cfrac%7B3%7D%7B2%7D%281-sin%7B%5Ctheta%7D%29)
+
+`fuzzyplot` supports up to 3 equations per image, passed as arguments one after the other. When only 1 equation is given, it is colored red, but if 2 or 3 are given, they are colored cyan, magenta, yellow, in that order. The colors mix together like colored filters.
+
+`fuzzyplot "±r=sin(t)" "±r=sin(t+2pi/3)" "±r=sin(t+4pi/3)" -A`
+
+![](images/flower.png)
+
+![](https://render.githubusercontent.com/render/math?math=%5Cbegin%7Bcases%7D%0Ar%3D%5Cpm%5Csin%7Bt%7D%5C%5C%0Ar%3D%5Cpm%5Csin%7B%28t%2B2%5Cpi%2F3%29%7D%5C%5C%0Ar%3D%5Cpm%5Csin%7B%28t%2B4%5Cpi%2F3%29%7D%5C%5C%0A%5Cend%7Bcases%7D)

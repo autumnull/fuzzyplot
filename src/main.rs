@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use image::{RgbImage, Rgb};
 use indicatif::ProgressIterator;
+use itertools::Itertools;
 use rug::Complex;
 use rug::ops::Pow;
 use std::f64::consts::TAU;
@@ -22,7 +23,7 @@ fn parse_height(input: &str) -> Result<u32, std::num::ParseIntError> {
 
 /// outputs a fuzzy-plotted graph image of a given equation
 #[derive(StructOpt)]
-#[structopt(setting(clap::AppSettings::AllowNegativeNumbers))]
+#[structopt(setting(clap::AppSettings::AllowLeadingHyphen))] // allows e.g. "-r=t"
 struct Cli {
     /// don't draw axes
     #[structopt(short = "A", long = "axisless")]
@@ -30,10 +31,10 @@ struct Cli {
     /// evaluate plain difference, not proportional to magnitude
     #[structopt(short, long = "plain")]
     plain_diff: bool,
-    /// equation to plot
+    /// equation(s) to plot (maximum 3)
     #[structopt()]
     equ_strings: Vec<String>,
-    /// filename of the new image. must be .png or .jp(e)g
+    /// filename of the new image
     #[structopt(short, long, parse(from_os_str), default_value="graph.png")]
     outfile: std::path::PathBuf,
     /// zoom level  
@@ -45,6 +46,9 @@ struct Cli {
     /// image height
     #[structopt(short, long, default_value = "width", parse(try_from_str = parse_height))]
     height: u32,
+    /// the range of theta (t) values considered, measured in full rotations
+    #[structopt(short = "T", long = "t-range")]
+    t_range: Option<Vec<i32>>,
 }
 
 type Expr = mexprp::Expression<Complex>;
@@ -86,15 +90,22 @@ impl Rect {
 }
 
 fn diff(context: &mexprp::Context<Complex>, plot: &Plot, params: &Params) -> f64 {
-    let lhs = plot.lhs_expr.eval_ctx(context).unwrap().unwrap_single();
-    let rhs = plot.rhs_expr.eval_ctx(context).unwrap().unwrap_single();
-    let d = if params.plain_diff {
-        (lhs-rhs).norm().real().to_f64()
-    } else {
-        let top = Complex::with_val(53, &lhs-&rhs);
-        (top / (lhs + rhs)).norm().real().to_f64()
-    };
-    d.pow(-2) / ACCURACY_CONST * params.thickness
+    let lhs_results = plot.lhs_expr.eval_ctx(context).unwrap().to_vec();
+    let rhs_results = plot.rhs_expr.eval_ctx(context).unwrap().to_vec();
+    let mut min_d = f64::INFINITY;
+    for (lhs, rhs) in lhs_results.iter().cartesian_product(rhs_results.iter()) {
+        min_d = min_d.min(
+            if params.plain_diff {
+                let top = Complex::with_val(53, lhs-rhs);
+                top.norm().real().to_f64()
+            } else {
+                let top = Complex::with_val(53, lhs-rhs);
+                let bottom = Complex::with_val(53, lhs+rhs);
+                (top / bottom).norm().real().to_f64()
+            }
+        );
+    }
+    min_d.pow(-2) / ACCURACY_CONST * params.thickness
 }
 
 // TODO ditch these and draw the lines using image library
@@ -108,24 +119,53 @@ fn grid_diff(p: &Point, params: &Params) -> f64 {
     (dx.powi(-2) + dy.powi(-2)) * params.thickness * AXIS_CONST * GRID_CONST
 }
 
-fn make_context(p: Point) -> mexprp::Context<Complex> {
+fn make_contexts(p: Point, t_range: (i32, i32)) -> Vec<mexprp::Context<Complex>> {
     let x = Complex::with_val(53, (p.x, 0.0));
     let y = Complex::with_val(53, (p.y, 0.0));
     let r = Complex::with_val(53, ((p.x.powi(2) + p.y.powi(2)).sqrt(), 0.0));
-    let t = Complex::with_val(53, (p.y.atan2(p.x) % TAU, 0.0));
+    let t = Complex::with_val(53, (p.y.atan2(p.x), 0.0));
     
-    // set to only return one sqrt() result
-    let mut context = mexprp::Context::new();
-    context.cfg = mexprp::Config {
-        implicit_multiplication: true,
-        precision: 53,
-        sqrt_both: false,
-    };
-    context.set_var("x", x);
-    context.set_var("y", y);
-    context.set_var("r", r);
-    context.set_var("t", t);
-    context
+    let mut contexts: Vec<mexprp::Context<Complex>> = Vec::new();
+    for i in (t_range.0*2)..(t_range.1*2) {
+        let mut context = mexprp::Context::new();
+        context.set_var("x", x.clone());
+        context.set_var("y", y.clone());
+        if i % 2 == 0 {
+            context.set_var("t", t.clone() + TAU * (i.div_euclid(2) as f64));
+            context.set_var("r", r.clone());
+        } else {
+            context.set_var("t", t.clone() - TAU/2.0 + TAU * (i.div_euclid(2) as f64));
+            context.set_var("r", -r.clone());
+        }
+        contexts.push(context);
+    }
+    contexts
+}
+
+fn make_plots(equ_strings: Vec<String>) -> Result<Vec<Plot>> {
+    let init_context = make_contexts(Point{x:0.0, y:0.0}, (0,1))[0].clone();
+    let mut plots: Vec<Plot> = Vec::new();
+    for (i, equ) in equ_strings.iter().enumerate() {
+        // separate the left and right sides of the equation
+        let split_equ = equ.split("=").collect::<Vec<&str>>();
+        let (lhs, rhs) = if split_equ.len() == 2 {
+            (split_equ[0], split_equ[1])
+        } else {
+            return Err(anyhow!("Equations should have 1 '=' sign"));
+        };
+        
+        // TODO handle errors more nicely
+        let lhs_expr = mexprp::Expression::parse_ctx(lhs, init_context.clone())
+            .unwrap();
+        let rhs_expr = mexprp::Expression::parse_ctx(rhs, init_context.clone())
+            .unwrap();
+            
+        // set color to red if only 1 equation, otherwise CMY
+        let color = if equ_strings.len() == 1 {6} else {1 << i as u8};
+        let plot = Plot{lhs_expr, rhs_expr, color};
+        plots.push(plot);
+    }
+    Ok(plots)
 }
 
 fn main() -> Result<()> {
@@ -134,11 +174,12 @@ fn main() -> Result<()> {
     // check valid image format before proceeding
     image::ImageFormat::from_path(args.outfile.as_path())
     .with_context(|| format!("Unrecognized file extension for image"))?;
+    let outfile = args.outfile.clone();
     
     if args.equ_strings.len() > 3 {
         return Err(anyhow!("Maximum of 3 equations allowed"));
     } else if args.equ_strings.len() == 0 {
-        return Err(anyhow!("Please provide at least one equation"));
+        return Err(anyhow!("No equation given. See 'fuzzyplot --help' for usage"));
     }
     
     let (width, height) = if args.height == 0 {
@@ -166,27 +207,16 @@ fn main() -> Result<()> {
         thickness: graph_rect.w * graph_rect.h,
     };
     
-    let context = make_context(Point{x:0.0, y:0.0});
-    
-    let mut plots: Vec<Plot> = Vec::new();
-    for (i, equ) in args.equ_strings.iter().enumerate() {
-        // separate the left and right sides of the equation
-        let split_equ = equ.split("=").collect::<Vec<&str>>();
-        let (lhs, rhs) = if split_equ.len() == 2 {
-            (split_equ[0], split_equ[1])
+    let theta_range = match args.t_range {
+        None => (0, 1),
+        Some(v) => if v.len() == 2 {
+            (v[0], v[1]+1)
         } else {
-            return Err(anyhow!("Equations should have 1 '=' sign"));
-        };
-        // TODO handle errors more nicely
-        let lhs_expr = mexprp::Expression::parse_ctx(lhs, context.clone())
-            .unwrap();
-        let rhs_expr = mexprp::Expression::parse_ctx(rhs, context.clone())
-            .unwrap();
-        // set color to red if only 1 equation, otherwise CMY
-        let color = if args.equ_strings.len() == 1 {6} else {1 << i as u8};
-        let plot = Plot{lhs_expr, rhs_expr, color};
-        plots.push(plot);
-    }
+            return Err(anyhow!("-t/--t-range option takes 2 integers"));
+        }
+    };
+    
+    let plots = make_plots(args.equ_strings)?;
     
     let mut img = RgbImage::new(width, height);
     
@@ -207,23 +237,26 @@ fn main() -> Result<()> {
                 pixel[channel] -= (axisness as u8).min(pixel[channel]);
             }
         };
-        let context = make_context(graph_point);
+        let contexts = make_contexts(graph_point, theta_range);
         for plot in plots.iter() {
-            let diff = diff(
-                &context,
-                &plot,
-                &params) as u8;
+            let mut max_diff: u8 = 0;
+            for context in contexts.iter() {
+                max_diff = max_diff.max(diff(
+                    &context,
+                    &plot,
+                    &params) as u8);
+            }
             for channel in 0..3 {
                 if (plot.color >> channel) & 0b1 == 0b1 {
-                    pixel[channel] -= diff.min(pixel[channel]);
+                    pixel[channel] -= max_diff.min(pixel[channel]);
                 }
             }
         }
     }
     
-    img.save(&args.outfile)
+    img.save(&outfile)
         .with_context(
-            || format!("Couldn't save file '{}'", args.outfile.display())
+            || format!("Couldn't save file '{}'", outfile.display())
         )?;
     println!("done!");
     Ok(())
