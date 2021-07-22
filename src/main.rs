@@ -10,7 +10,6 @@ use structopt::StructOpt;
 // TODO add GRAPH_BOUNDS, GRID_SIZE to CLI
 const ACCURACY_CONST: f64 = (1 << 16) as f64;
 const AXIS_CONST: f64 = 0.0001;
-const GRID_CONST: f64 = 0.1;
 const GRID_SIZE: f64 = 1.0;
 
 fn parse_height(input: &str) -> Result<u32, std::num::ParseIntError> {
@@ -113,10 +112,13 @@ fn axis_diff(p: &Point, params: &Params) -> f64 {
     (p.x.powi(-2) + p.y.powi(-2)) * params.thickness * AXIS_CONST
 }
 
-fn grid_diff(p: &Point, params: &Params) -> f64 {
-    let dx = (p.x - GRID_SIZE/2.0).rem_euclid(GRID_SIZE) - GRID_SIZE/2.0;
-    let dy = (p.y - GRID_SIZE/2.0).rem_euclid(GRID_SIZE) - GRID_SIZE/2.0;
-    (dx.powi(-2) + dy.powi(-2)) * params.thickness * AXIS_CONST * GRID_CONST
+fn grid_diff(p: &Point, pixel_r: f64) -> f64 {
+    if (p.x+pixel_r).rem_euclid(GRID_SIZE).abs() < 2.0 * pixel_r
+    || (p.y+pixel_r).rem_euclid(GRID_SIZE).abs() < 2.0 * pixel_r {
+        100.0
+    } else {
+        0.0
+    }
 }
 
 fn make_contexts(p: Point, t_range: (i32, i32)) -> Vec<mexprp::Context<Complex>> {
@@ -202,6 +204,8 @@ fn main() -> Result<()> {
         w: graph_rect_r * 2.0 * aspect_ratio,
         h: graph_rect_r * 2.0,
     };
+    let graph_pixel_r = graph_rect.w/img_rect.w/2.0;
+    
     let params = Params {
         plain_diff: args.plain_diff,
         thickness: graph_rect.w * graph_rect.h,
@@ -235,9 +239,9 @@ fn main() -> Result<()> {
         let graph_point = img_rect.map_point(&img_point, &graph_rect);
         
         *pixel = Rgb([255, 255, 255]);
-        if !args.no_axes {
+        if ! args.no_axes {
             let axisness = axis_diff(&graph_point, &params)
-            + grid_diff(&graph_point, &params);
+                + grid_diff(&graph_point, graph_pixel_r);
             for channel in 0..3 {
                 pixel[channel] -= (axisness as u8).min(pixel[channel]);
             }
