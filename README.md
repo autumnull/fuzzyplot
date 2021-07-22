@@ -1,4 +1,4 @@
-# fuzzyplot
+# fuzzyplot :heart:
 
 ### A fuzzier graph plotting method
 
@@ -15,11 +15,11 @@
 #### What benefits does this give ?
 
 - Shows point-solutions that may be hard to find with other methods
-- Makes the graphs look soft and pretty ^\_^
+- Makes the graphs look soft and pretty \^\_\^
 
 ### Pictures !
 
-Axes can be turned off with the `-A/--axisless` flag
+Axes can be turned off with the `-A`/`--axisless` flag
 
 `fuzzyplot "(x^2 + y^2 - 1)^3 = x^2 y^3 --axisless"`
 
@@ -27,7 +27,7 @@ Axes can be turned off with the `-A/--axisless` flag
 
 ![](https://render.githubusercontent.com/render/math?math=%7B%28x%5E2%20%2B%20y%5E2%20-%201%29%7D%5E3%20%3D%20x%5E2y%5E3)
 
-The `-z/--zoom` option lets you set the zoom level. Negative numbers mean zoom out.
+The `-z`/`--zoom` option lets you set the zoom level. Negative numbers mean zoom out.
 
 `fuzzyplot "x^y = y^x" --zoom -3`
 
@@ -43,7 +43,7 @@ The `-z/--zoom` option lets you set the zoom level. Negative numbers mean zoom o
 
 ![](https://render.githubusercontent.com/render/math?math=y%20%3D%20x%5Ex)
 
-By default, `fuzzyplot` divides the difference in the equation by the magnitude of the two expressions, in order to counteract the bias toward small values. Sometimes certain graphs work better with just plain difference, without the division. This mode can be set with the `-p/--plain` flag.
+By default, `fuzzyplot` divides the difference in the equation by the magnitude of the two expressions, in order to counteract the bias toward small values. Sometimes certain graphs work better with just plain difference, without the division. This mode can be set with the `-p`/`--plain` flag.
 
 `fuzzyplot "r = 3/2 (1 - sin(t))" --zoom -2 --plain`
 

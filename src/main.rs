@@ -220,11 +220,16 @@ fn main() -> Result<()> {
     
     let mut img = RgbImage::new(width, height);
     
+    println!("Generating image...");
+    
     let pb = indicatif::ProgressBar::new((height * width) as u64);
+    pb.set_style(indicatif::ProgressStyle::default_bar()
+        .template("{prefix:>10.green} [{wide_bar}] {pos:>6}/{len:>6} ({eta})")
+        .progress_chars("=> "));
+    pb.set_prefix("Plotting");
     pb.set_draw_rate(3);
     
     // TODO multithreading
-    println!("generating image...");
     for (x, y, pixel) in img.enumerate_pixels_mut().progress_with(pb) {
         let img_point = Point{x: x as f64, y: (height-1 - y) as f64};
         let graph_point = img_rect.map_point(&img_point, &graph_rect);
@@ -258,6 +263,6 @@ fn main() -> Result<()> {
         .with_context(
             || format!("Couldn't save file '{}'", outfile.display())
         )?;
-    println!("done!");
+    println!("Done!");
     Ok(())
 }
