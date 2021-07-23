@@ -7,47 +7,37 @@ use rug::ops::Pow;
 use std::f64::consts::TAU;
 use structopt::StructOpt;
 
-// TODO add GRAPH_BOUNDS, GRID_SIZE to CLI
+// TODO add GRID_SIZE to CLI
 const ACCURACY_CONST: f64 = (1 << 16) as f64;
 const AXIS_CONST: f64 = 0.0001;
 const GRID_SIZE: f64 = 1.0;
 
-fn parse_height(input: &str) -> Result<u32, std::num::ParseIntError> {
-    if input == "width" {
-        Ok(0)
-    } else {
-        std::str::FromStr::from_str(input)
-    }
-}
-
-/// outputs a fuzzy-plotted graph image of a given equation
+// TODO add more detailed help messages
 #[derive(StructOpt)]
-#[structopt(setting(clap::AppSettings::AllowLeadingHyphen))] // allows e.g. "-r=t"
+#[structopt(setting(clap::AppSettings::AllowNegativeNumbers))]
+/// Outputs a fuzzy-plotted graph image of a given equation
 struct Cli {
-    /// don't draw axes
+    /// Don't draw axes
     #[structopt(short = "A", long = "axisless")]
     no_axes: bool,
-    /// evaluate plain difference, not proportional to magnitude
+    /// Evaluate plain difference, not proportional to magnitude
     #[structopt(short, long = "plain")]
     plain_diff: bool,
-    /// equation(s) to plot (maximum 3)
-    #[structopt()]
-    equ_strings: Vec<String>,
-    /// filename of the new image
-    #[structopt(short, long, parse(from_os_str), default_value="graph.png")]
+    /// Equation(s) to plot (maximum 3)
+    #[structopt(allow_hyphen_values(true), required(true), max_values(3))] // allows e.g. "-r=t"
+    equations: Vec<String>,
+    /// Filename of the new image
+    #[structopt(short, long, parse(from_os_str), default_value = "graph.png")]
     outfile: std::path::PathBuf,
-    /// zoom level  
-    #[structopt(short, long, default_value="-1")]
+    /// Zoom level  
+    #[structopt(short, long, default_value = "-1")]
     zoom: f64,
-    /// image width
-    #[structopt(short, long, default_value = "800")]
-    width: u32,
-    /// image height
-    #[structopt(short, long, default_value = "width", parse(try_from_str = parse_height))]
-    height: u32,
-    /// the range of theta (t) values considered, measured in full rotations
-    #[structopt(short = "T", long = "t-range")]
-    t_range: Option<Vec<i32>>,
+    /// Image dimensions
+    #[structopt(short, long, value_names(&["WIDTH", "HEIGHT"]))]
+    dimensions: Vec<u32>,
+    /// Range of theta (t) values considered
+    #[structopt(short, long, value_names(&["MIN", "MAX"]))]
+    t_range: Vec<i32>,
 }
 
 type Expr = mexprp::Expression<Complex>;
@@ -107,7 +97,6 @@ fn diff(context: &mexprp::Context<Complex>, plot: &Plot, params: &Params) -> f64
     min_d.pow(-2) / ACCURACY_CONST * params.thickness
 }
 
-// TODO ditch these and draw the lines using image library
 fn axis_diff(p: &Point, params: &Params) -> f64 {
     (p.x.powi(-2) + p.y.powi(-2)) * params.thickness * AXIS_CONST
 }
@@ -136,7 +125,8 @@ fn make_contexts(p: Point, t_range: (i32, i32)) -> Vec<mexprp::Context<Complex>>
             context.set_var("t", t.clone() + TAU * (i.div_euclid(2) as f64));
             context.set_var("r", r.clone());
         } else {
-            context.set_var("t", t.clone() - TAU/2.0 + TAU * (i.div_euclid(2) as f64));
+            let half_circle = if *t.real() < 0 { TAU/2.0 } else { -TAU/2.0 };
+            context.set_var("t", t.clone() + half_circle + TAU * (i.div_euclid(2) as f64));
             context.set_var("r", -r.clone());
         }
         contexts.push(context);
@@ -144,10 +134,10 @@ fn make_contexts(p: Point, t_range: (i32, i32)) -> Vec<mexprp::Context<Complex>>
     contexts
 }
 
-fn make_plots(equ_strings: Vec<String>) -> Result<Vec<Plot>> {
+fn make_plots(equations: Vec<String>) -> Result<Vec<Plot>> {
     let init_context = make_contexts(Point{x:0.0, y:0.0}, (0,1))[0].clone();
     let mut plots: Vec<Plot> = Vec::new();
-    for (i, equ) in equ_strings.iter().enumerate() {
+    for (i, equ) in equations.iter().enumerate() {
         // separate the left and right sides of the equation
         let split_equ = equ.split("=").collect::<Vec<&str>>();
         let (lhs, rhs) = if split_equ.len() == 2 {
@@ -163,7 +153,7 @@ fn make_plots(equ_strings: Vec<String>) -> Result<Vec<Plot>> {
             .unwrap();
             
         // set color to red if only 1 equation, otherwise CMY
-        let color = if equ_strings.len() == 1 {6} else {1 << i as u8};
+        let color = if equations.len() == 1 {6} else {1 << i as u8};
         let plot = Plot{lhs_expr, rhs_expr, color};
         plots.push(plot);
     }
@@ -178,16 +168,13 @@ fn main() -> Result<()> {
     .with_context(|| format!("Unrecognized file extension for image"))?;
     let outfile = args.outfile.clone();
     
-    if args.equ_strings.len() > 3 {
-        return Err(anyhow!("Maximum of 3 equations allowed"));
-    } else if args.equ_strings.len() == 0 {
-        return Err(anyhow!("No equation given. See 'fuzzyplot --help' for usage"));
-    }
-    
-    let (width, height) = if args.height == 0 {
-        (args.width, args.width)
-    } else {
-        (args.width, args.height)
+    let (width, height) = match args.dimensions.len() {
+        2 => (args.dimensions[0], args.dimensions[1]),
+        _ => (800, 800),
+    };
+    let theta_range = match args.t_range.len() {
+        2 => (args.t_range[0], args.t_range[1] + 1),
+        _ => (0, 1),
     };
     
     let img_rect = Rect{
@@ -211,16 +198,7 @@ fn main() -> Result<()> {
         thickness: graph_rect.w * graph_rect.h,
     };
     
-    let theta_range = match args.t_range {
-        None => (0, 1),
-        Some(v) => if v.len() == 2 {
-            (v[0], v[1]+1)
-        } else {
-            return Err(anyhow!("-t/--t-range option takes 2 integers"));
-        }
-    };
-    
-    let plots = make_plots(args.equ_strings)?;
+    let plots = make_plots(args.equations)?;
     
     let mut img = RgbImage::new(width, height);
     
@@ -228,7 +206,7 @@ fn main() -> Result<()> {
     
     let pb = indicatif::ProgressBar::new((height * width) as u64);
     pb.set_style(indicatif::ProgressStyle::default_bar()
-        .template("{prefix:>10.green} [{wide_bar}] {pos:>6}/{len:>6} ({eta})")
+        .template("{prefix:>10.green} [{wide_bar}] {pos:>6}/{len:6} ({eta:>3})")
         .progress_chars("=> "));
     pb.set_prefix("Plotting");
     pb.set_draw_rate(3);
