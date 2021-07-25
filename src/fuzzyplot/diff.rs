@@ -1,4 +1,4 @@
-use crate::fuzzyplot::{Params, Plot, Point};
+use crate::fuzzyplot::{setup::Params, Plot, Point};
 use itertools::Itertools;
 use rug::Complex;
 

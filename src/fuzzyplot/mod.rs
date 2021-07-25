@@ -14,12 +14,6 @@ pub struct Plot {
 }
 
 #[derive(Debug)]
-pub struct Params {
-    pub plain_diff: bool,
-    pub thickness: f64,
-}
-
-#[derive(Debug)]
 pub struct Point {
     pub x: f64,
     pub y: f64,

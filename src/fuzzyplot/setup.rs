@@ -1,44 +1,69 @@
-use crate::fuzzyplot::cli::Cli;
-use crate::fuzzyplot::{Plot, Point, Rect};
+use crate::fuzzyplot::{cli::Cli, Plot, Point, Rect};
 use anyhow::{anyhow, Context, Result};
 use rug::Complex;
 use std::f64::consts::TAU;
 
-pub fn parse_args(args: &mut Cli) -> Result<()> {
-    // check valid image format before proceeding
-    image::ImageFormat::from_path(args.outfile.as_path())
-        .with_context(|| format!("Unrecognized file extension for image"))?;
-
-    if args.size.len() != 2 {
-        args.size = vec![800, 800];
-    }
-    if args.t_range.len() != 2 {
-        args.t_range = vec![0, 0];
-    }
-    Ok(())
+#[derive(Debug)]
+pub struct Params {
+    pub size: (u32, u32),
+    pub t_range: (i32, i32),
+    pub img_rect: Rect,
+    pub graph_rect: Rect,
+    pub graph_pixel_r: f64,
+    pub thickness: f64,
+    pub plain_diff: bool,
 }
 
-pub fn make_rects(width: u32, height: u32, zoom: f64) -> (Rect, Rect) {
-    let img_rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        w: width as f64,
-        h: height as f64,
-    };
-    let aspect_ratio = (width / height) as f64;
-    let graph_rect_r = 2.0_f64.powf(-zoom);
-    let graph_rect = Rect {
-        x: -graph_rect_r * aspect_ratio,
-        y: -graph_rect_r,
-        w: graph_rect_r * 2.0 * aspect_ratio,
-        h: graph_rect_r * 2.0,
-    };
-    (img_rect, graph_rect)
+impl Params {
+    pub fn from_args(args: &Cli) -> Result<Params> {
+        // check valid file extension before proceeding
+        image::ImageFormat::from_path(args.outfile.as_path()).with_context(
+            || format!("Unrecognized file extension for image"),
+        )?;
+
+        let size = if args.size.len() == 2 {
+            (args.size[0], args.size[1])
+        } else {
+            (800, 800)
+        };
+        let t_range = if args.t_range.len() == 2 {
+            (args.t_range[0], args.t_range[1] + 1)
+        } else {
+            (0, 1)
+        };
+
+        let img_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: size.0 as f64,
+            h: size.1 as f64,
+        };
+        let aspect_ratio = (size.0 / size.1) as f64;
+        let graph_rect_r = 2.0_f64.powf(-args.zoom);
+        let graph_rect = Rect {
+            x: -graph_rect_r * aspect_ratio,
+            y: -graph_rect_r,
+            w: graph_rect_r * 2.0 * aspect_ratio,
+            h: graph_rect_r * 2.0,
+        };
+        let graph_pixel_r = graph_rect.w / img_rect.w / 2.0;
+        let thickness = graph_rect.w * graph_rect.h;
+
+        Ok(Params {
+            size,
+            t_range,
+            img_rect,
+            graph_rect,
+            graph_pixel_r,
+            thickness,
+            plain_diff: args.plain_diff,
+        })
+    }
 }
 
 pub fn make_contexts(
     p: Point,
-    t_range: &Vec<i32>,
+    t_range: (i32, i32),
 ) -> Vec<mexprp::Context<Complex>> {
     let x = Complex::with_val(53, (p.x, 0.0));
     let y = Complex::with_val(53, (p.y, 0.0));
@@ -46,30 +71,28 @@ pub fn make_contexts(
     let t = Complex::with_val(53, (p.y.atan2(p.x), 0.0));
 
     let mut contexts: Vec<mexprp::Context<Complex>> = Vec::new();
-    for i in (t_range[0] * 2)..((t_range[1] + 1) * 2) {
-        let mut context = mexprp::Context::new();
-        context.set_var("x", x.clone());
-        context.set_var("y", y.clone());
-        if i % 2 == 0 {
-            context.set_var("t", t.clone() + TAU * (i.div_euclid(2) as f64));
-            context.set_var("r", r.clone());
-        } else {
-            let half_circle =
-                if *t.real() < 0 { TAU / 2.0 } else { -TAU / 2.0 };
-            context.set_var(
-                "t",
-                t.clone() + half_circle + TAU * (i.div_euclid(2) as f64),
-            );
-            context.set_var("r", -r.clone());
+    for i in t_range.0..t_range.1 {
+        // accomodate negative r for opposite angle
+        for r_coeff in [1, -1] {
+            let mut context = mexprp::Context::new();
+            context.set_var("x", x.clone());
+            context.set_var("y", y.clone());
+            context.set_var("r", r_coeff * r.clone());
+            if r_coeff == 1 {
+                context.set_var("t", t.clone() + TAU * (i as f64));
+            } else {
+                let half_turn = t.real().to_f64().signum() * -TAU / 2.0;
+                context.set_var("t", t.clone() + half_turn + TAU * (i as f64));
+            }
+            contexts.push(context);
         }
-        contexts.push(context);
     }
     contexts
 }
 
 pub fn make_plots(equations: &Vec<String>) -> Result<Vec<Plot>> {
     let init_context =
-        make_contexts(Point { x: 0.0, y: 0.0 }, &vec![0, 1])[0].clone();
+        make_contexts(Point { x: 0.0, y: 0.0 }, (0, 1))[0].clone();
     let mut plots: Vec<Plot> = Vec::new();
     for (i, equ) in equations.iter().enumerate() {
         // separate the left and right sides of the equation
@@ -88,9 +111,9 @@ pub fn make_plots(equations: &Vec<String>) -> Result<Vec<Plot>> {
 
         // set color to red if only 1 equation, otherwise CMY
         let color = if equations.len() == 1 {
-            6
+            0b001
         } else {
-            1 << i as u8
+            0b111 ^ (1 << i)
         };
         let plot = Plot {
             lhs_expr,
