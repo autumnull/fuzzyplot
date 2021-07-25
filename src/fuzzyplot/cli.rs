@@ -12,7 +12,8 @@ pub struct Cli {
     #[structopt(short, long = "plain")]
     pub plain_diff: bool,
     /// Equation(s) to plot (maximum 3)
-    #[structopt(allow_hyphen_values(true), required(true), max_values(3))] // allows e.g. "-r=t"
+    #[structopt(allow_hyphen_values(true), required(true), max_values(3))]
+    // allows e.g. "-r=t"
     pub equations: Vec<String>,
     /// Filename of the new image
     #[structopt(short, long, parse(from_os_str), default_value = "graph.png")]

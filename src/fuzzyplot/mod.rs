@@ -4,18 +4,13 @@ pub mod cli;
 pub mod diff;
 pub mod setup;
 
-// TODO add GRID_SIZE to CLI
-const ACCURACY_CONST: f64 = (1 << 16) as f64;
-const AXIS_CONST: f64 = 0.0001;
-const GRID_SIZE: f64 = 1.0;
-
 type Expr = mexprp::Expression<Complex>;
 
 #[derive(Debug)]
 pub struct Plot {
     pub lhs_expr: Expr,
     pub rhs_expr: Expr,
-    pub color: u8
+    pub color: u8,
 }
 
 #[derive(Debug)]
