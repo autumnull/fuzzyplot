@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context, Result};
 use rug::Complex;
 use std::f64::consts::TAU;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Params {
     pub size: (u32, u32),
     pub t_range: (i32, i32),
@@ -12,6 +12,7 @@ pub struct Params {
     pub graph_pixel_r: f64,
     pub thickness: f64,
     pub plain_diff: bool,
+    pub draw_axes: bool,
 }
 
 impl Params {
@@ -57,6 +58,7 @@ impl Params {
             graph_pixel_r,
             thickness,
             plain_diff: args.plain_diff,
+            draw_axes: !args.no_axes,
         })
     }
 }
