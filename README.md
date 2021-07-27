@@ -1,4 +1,4 @@
-# fuzzyplot :heart:
+# fuzzyplot ❤️
 
 ### A fuzzier graph plotting method
 
@@ -21,7 +21,7 @@
 
 Axes can be turned off with the `-A`/`--axisless` flag
 
-`fuzzyplot "(x^2 + y^2 - 1)^3 = x^2 y^3 --axisless"`
+`fuzzyplot "(x^2 + y^2 - 1)^3 = x^2 y^3" --axisless`
 
 ![](images/heart.png)
 

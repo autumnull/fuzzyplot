@@ -38,11 +38,12 @@ fn main() -> Result<()> {
             scope.spawn(move |_| {
                 let plots = setup::make_plots(&equations).unwrap();
                 loop {
-                    let (x, y, pixel) = if let Some(t) = img_iter.lock().unwrap().next() {
-                        t
-                    } else {
-                        break
-                    };
+                    let (x, y, pixel) =
+                        if let Some(t) = img_iter.lock().unwrap().next() {
+                            t
+                        } else {
+                            break;
+                        };
                     let img_point = Point {
                         x: x as f64,
                         y: (height - 1 - y) as f64,
