@@ -1,8 +1,8 @@
 use crate::fuzzyplot::{cli::Cli, Plot, Point, Rect};
 use anyhow::{anyhow, Context, Result};
+use failure::Fail;
 use rug::Complex;
 use std::f64::consts::TAU;
-use failure::Fail;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Params {
@@ -19,9 +19,9 @@ pub struct Params {
 impl Params {
     pub fn from_args(args: &Cli) -> Result<Params> {
         // check valid file extension before proceeding
-        image::ImageFormat::from_path(args.outfile.as_path()).with_context(
-            || "Unrecognized file extension for image")?;
-        
+        image::ImageFormat::from_path(args.outfile.as_path())
+            .with_context(|| "Unrecognized file extension for image")?;
+
         // we do a lil baby test to check that the equation is valid
         let plots_test = make_plots(&args.equations)?;
         let (lhs_result, rhs_result) =
@@ -31,7 +31,13 @@ impl Params {
         }
 
         let size = if args.size.len() == 2 {
-            (args.size[0], args.size[1])
+            if args.size[0] < 1 || args.size[1] < 1 {
+                return Err(anyhow!(
+                    "Image dimensions must be greater than zero"
+                ));
+            } else {
+                (args.size[0], args.size[1])
+            }
         } else {
             (800, 800)
         };
@@ -47,13 +53,17 @@ impl Params {
             w: size.0 as f64,
             h: size.1 as f64,
         };
-        let aspect_ratio = (size.0 / size.1) as f64;
+        let (x_ratio, y_ratio) = if size.0 < size.1 {
+            (1.0, (size.1 / size.0) as f64)
+        } else {
+            ((size.0 / size.1) as f64, 1.0)
+        };
         let graph_rect_r = 2.0_f64.powf(-args.zoom);
         let graph_rect = Rect {
-            x: -graph_rect_r * aspect_ratio,
-            y: -graph_rect_r,
-            w: graph_rect_r * 2.0 * aspect_ratio,
-            h: graph_rect_r * 2.0,
+            x: -graph_rect_r * x_ratio,
+            y: -graph_rect_r * y_ratio,
+            w: graph_rect_r * 2.0 * x_ratio,
+            h: graph_rect_r * 2.0 * y_ratio,
         };
         let graph_pixel_r = graph_rect.w / img_rect.w / 2.0;
         let thickness = graph_rect.w * graph_rect.h;
@@ -85,12 +95,14 @@ pub fn make_contexts(
         // accomodate negative r for opposite angle
         for r_coeff in [1, -1] {
             let mut context = mexprp::Context::new();
+            context.set_var("tau", Complex::with_val(53, (TAU, 0.0))); // yes
             context.set_var("x", x.clone());
             context.set_var("y", y.clone());
             context.set_var("r", r_coeff * r.clone());
             if r_coeff == 1 {
                 context.set_var("t", t.clone() + TAU * (i as f64));
             } else {
+                // if t is negative, turn in positive direction, and vice versa
                 let half_turn = t.real().to_f64().signum() * -TAU / 2.0;
                 context.set_var("t", t.clone() + half_turn + TAU * (i as f64));
             }
@@ -113,14 +125,20 @@ pub fn make_plots(equations: &Vec<String>) -> Result<Vec<Plot>> {
             return Err(anyhow!("Equations should have 1 '=' sign"));
         };
 
-        let lhs_expr = match mexprp::Expression::parse_ctx(lhs, init_context.clone()) {
-            Ok(expr) => expr,
-            Err(e) => return Err(e.compat()).context("Failed to parse equation"),
-        };
-        let rhs_expr = match mexprp::Expression::parse_ctx(rhs, init_context.clone()) {
-            Ok(expr) => expr,
-            Err(e) => return Err(e.compat()).context("Failed to parse equation"),
-        };
+        let lhs_expr =
+            match mexprp::Expression::parse_ctx(lhs, init_context.clone()) {
+                Ok(expr) => expr,
+                Err(e) => {
+                    return Err(e.compat()).context("Failed to parse equation")
+                }
+            };
+        let rhs_expr =
+            match mexprp::Expression::parse_ctx(rhs, init_context.clone()) {
+                Ok(expr) => expr,
+                Err(e) => {
+                    return Err(e.compat()).context("Failed to parse equation")
+                }
+            };
 
         // set color to red if only 1 equation, otherwise CMY
         let color = if equations.len() == 1 {

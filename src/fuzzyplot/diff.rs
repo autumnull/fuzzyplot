@@ -2,7 +2,6 @@ use crate::fuzzyplot::{setup::Params, Plot, Point};
 use itertools::Itertools;
 use rug::Complex;
 
-// TODO add GRID_SIZE to CLI
 const ACCURACY_CONST: f64 = (1 << 16) as f64;
 const AXIS_CONST: f64 = 0.0001;
 const GRID_SIZE: f64 = 1.0;
