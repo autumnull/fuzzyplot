@@ -17,6 +17,7 @@ edition = "2018"
 anyhow = "1.0.42"
 clap = "2.32.0"
 crossbeam = "0.8.1"
+failure = "0.1.1" # would love to just use anyhow but mexprp forbids it
 image = "0.23.14"
 indicatif = "0.16.2"
 itertools = "0.8.2"

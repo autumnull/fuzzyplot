@@ -2,6 +2,7 @@ use crate::fuzzyplot::{cli::Cli, Plot, Point, Rect};
 use anyhow::{anyhow, Context, Result};
 use rug::Complex;
 use std::f64::consts::TAU;
+use failure::Fail;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Params {
@@ -19,8 +20,15 @@ impl Params {
     pub fn from_args(args: &Cli) -> Result<Params> {
         // check valid file extension before proceeding
         image::ImageFormat::from_path(args.outfile.as_path()).with_context(
-            || format!("Unrecognized file extension for image"),
-        )?;
+            || "Unrecognized file extension for image")?;
+        
+        // we do a lil baby test to check that the equation is valid
+        let plots_test = make_plots(&args.equations)?;
+        let (lhs_result, rhs_result) =
+            (plots_test[0].lhs_expr.eval(), plots_test[0].rhs_expr.eval());
+        if let Err(e) = lhs_result.and(rhs_result) {
+            return Err(e.compat()).context("Failed to parse equation");
+        }
 
         let size = if args.size.len() == 2 {
             (args.size[0], args.size[1])
@@ -105,11 +113,14 @@ pub fn make_plots(equations: &Vec<String>) -> Result<Vec<Plot>> {
             return Err(anyhow!("Equations should have 1 '=' sign"));
         };
 
-        // TODO handle errors more nicely
-        let lhs_expr =
-            mexprp::Expression::parse_ctx(lhs, init_context.clone()).unwrap();
-        let rhs_expr =
-            mexprp::Expression::parse_ctx(rhs, init_context.clone()).unwrap();
+        let lhs_expr = match mexprp::Expression::parse_ctx(lhs, init_context.clone()) {
+            Ok(expr) => expr,
+            Err(e) => return Err(e.compat()).context("Failed to parse equation"),
+        };
+        let rhs_expr = match mexprp::Expression::parse_ctx(rhs, init_context.clone()) {
+            Ok(expr) => expr,
+            Err(e) => return Err(e.compat()).context("Failed to parse equation"),
+        };
 
         // set color to red if only 1 equation, otherwise CMY
         let color = if equations.len() == 1 {
