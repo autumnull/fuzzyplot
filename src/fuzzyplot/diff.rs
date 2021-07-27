@@ -2,10 +2,6 @@ use crate::fuzzyplot::{setup::Params, Plot, Point};
 use itertools::Itertools;
 use rug::Complex;
 
-const ACCURACY_CONST: f64 = (1 << 16) as f64;
-const AXIS_CONST: f64 = 0.0001;
-const GRID_SIZE: f64 = 1.0;
-
 pub fn diff(
     context: &mexprp::Context<Complex>,
     plot: &Plot,
@@ -24,18 +20,24 @@ pub fn diff(
             (top / bottom).norm().real().to_f64()
         });
     }
-    min_d.powi(-2) / ACCURACY_CONST * params.thickness
+    ((min_d * params.sharpness).powi(2) + 1.0).powi(-1)
 }
 
 pub fn axis_diff(p: &Point, params: &Params) -> f64 {
-    (p.x.powi(-2) + p.y.powi(-2)) * params.thickness * AXIS_CONST
+    let pix_r = params.graph_pixel_r;
+    if p.x.abs() < pix_r || p.y.abs() < pix_r {
+        1.0
+    } else {
+        0.0
+    }
 }
 
-pub fn grid_diff(p: &Point, pixel_r: f64) -> f64 {
-    if (p.x + pixel_r).rem_euclid(GRID_SIZE).abs() < 2.0 * pixel_r
-        || (p.y + pixel_r).rem_euclid(GRID_SIZE).abs() < 2.0 * pixel_r
+pub fn grid_diff(p: &Point, params: &Params) -> f64 {
+    let pix_r = params.graph_pixel_r;
+    if (p.x + pix_r).rem_euclid(params.grid_size).abs() < 2.0 * pix_r
+        || (p.y + pix_r).rem_euclid(params.grid_size).abs() < 2.0 * pix_r
     {
-        100.0
+        0.4
     } else {
         0.0
     }

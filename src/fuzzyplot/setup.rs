@@ -11,9 +11,10 @@ pub struct Params {
     pub img_rect: Rect,
     pub graph_rect: Rect,
     pub graph_pixel_r: f64,
-    pub thickness: f64,
+    pub sharpness: f64,
     pub plain_diff: bool,
     pub draw_axes: bool,
+    pub grid_size: f64,
 }
 
 impl Params {
@@ -30,16 +31,21 @@ impl Params {
             return Err(e.compat()).context("Failed to parse equation");
         }
 
-        let size = if args.size.len() == 2 {
-            if args.size[0] < 1 || args.size[1] < 1 {
+        let size = if args.dimensions.len() == 2 {
+            if args.dimensions[0] < 1 || args.dimensions[1] < 1 {
                 return Err(anyhow!(
                     "Image dimensions must be greater than zero"
                 ));
             } else {
-                (args.size[0], args.size[1])
+                (args.dimensions[0], args.dimensions[1])
             }
         } else {
             (800, 800)
+        };
+        let center = if args.focus.len() == 2 {
+            (args.focus[0], args.focus[1])
+        } else {
+            (0.0, 0.0)
         };
         let t_range = if args.t_range.len() == 2 {
             (args.t_range[0], args.t_range[1] + 1)
@@ -60,13 +66,13 @@ impl Params {
         };
         let graph_rect_r = 2.0_f64.powf(-args.zoom);
         let graph_rect = Rect {
-            x: -graph_rect_r * x_ratio,
-            y: -graph_rect_r * y_ratio,
+            x: center.0 - graph_rect_r * x_ratio,
+            y: center.1 - graph_rect_r * y_ratio,
             w: graph_rect_r * 2.0 * x_ratio,
             h: graph_rect_r * 2.0 * y_ratio,
         };
         let graph_pixel_r = graph_rect.w / img_rect.w / 2.0;
-        let thickness = graph_rect.w * graph_rect.h;
+        let sharpness = 2.0_f64.powf(args.sharpness + 8.0);
 
         Ok(Params {
             size,
@@ -74,9 +80,10 @@ impl Params {
             img_rect,
             graph_rect,
             graph_pixel_r,
-            thickness,
+            sharpness,
             plain_diff: args.plain_diff,
             draw_axes: !args.no_axes,
+            grid_size: args.grid_size,
         })
     }
 }

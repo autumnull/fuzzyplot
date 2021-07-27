@@ -55,10 +55,8 @@ fn main() -> Result<()> {
                     *pixel = Rgb([255, 255, 255]);
                     if params.draw_axes {
                         let axisness = diff::axis_diff(&graph_point, &params)
-                            + diff::grid_diff(
-                                &graph_point,
-                                params.graph_pixel_r,
-                            );
+                            .max(diff::grid_diff(&graph_point, &params))
+                            * 255.0;
                         for channel in 0..3 {
                             pixel[channel] -=
                                 (axisness as u8).min(pixel[channel]);
@@ -67,16 +65,16 @@ fn main() -> Result<()> {
                     let contexts =
                         setup::make_contexts(graph_point, params.t_range);
                     for plot in plots.iter() {
-                        let mut max_diff: u8 = 0;
+                        let mut max_diff: f64 = 0.0;
                         for context in contexts.iter() {
-                            max_diff =
-                                max_diff
-                                    .max(diff::diff(&context, &plot, &params)
-                                        as u8);
+                            max_diff = max_diff.max(
+                                diff::diff(&context, &plot, &params) * 255.0,
+                            );
                         }
                         for channel in 0..3 {
                             if (plot.color >> channel) & 1 == 0 {
-                                pixel[channel] -= max_diff.min(pixel[channel]);
+                                pixel[channel] -=
+                                    (max_diff as u8).min(pixel[channel]);
                             }
                         }
                     }
