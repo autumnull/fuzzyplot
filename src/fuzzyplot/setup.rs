@@ -42,7 +42,7 @@ impl Params {
         } else {
             (800, 800)
         };
-        let center = if args.focus.len() == 2 {
+        let focus = if args.focus.len() == 2 {
             (args.focus[0], args.focus[1])
         } else {
             (0.0, 0.0)
@@ -66,8 +66,8 @@ impl Params {
         };
         let graph_rect_r = 2.0_f64.powf(-args.zoom);
         let graph_rect = Rect {
-            x: center.0 - graph_rect_r * x_ratio,
-            y: center.1 - graph_rect_r * y_ratio,
+            x: focus.0 - graph_rect_r * x_ratio,
+            y: focus.1 - graph_rect_r * y_ratio,
             w: graph_rect_r * 2.0 * x_ratio,
             h: graph_rect_r * 2.0 * y_ratio,
         };
