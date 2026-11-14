@@ -14,14 +14,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.42"
-clap = "2.32.0"
-crossbeam = "0.8.1"
-failure = "0.1.1" # would love to just use anyhow but mexprp forbids it
-image = "0.23.14"
-indicatif = "0.16.2"
-itertools = "0.8.2"
-mexprp = "0.3.1"
-rug = "1.28.0"
-gmp-mpfr-sys = { version = "1.6", default-features = false, features = ["use-system-libs"] }
-structopt = "0.3.22"
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+image = "0.25.10"
+num-complex = "0.4.6"
+
+[profile.release]
+lto = true
+codegen-units = 1

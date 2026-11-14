@@ -1,11 +1,8 @@
-use structopt::StructOpt;
+use clap::Parser;
 
 // TODO add color to CLI
-#[derive(StructOpt)]
-#[structopt(
-    setting(clap::AppSettings::AllowNegativeNumbers),
-    verbatim_doc_comment
-)]
+#[derive(Parser)]
+#[command(version, verbatim_doc_comment)]
 /** Outputs a fuzzy-plotted graph image of a given equation
 
 Fuzzyplot is a graph-plotting program. Instead of plotting points where
@@ -17,7 +14,7 @@ pub struct Cli {
 
     When this flag is used, the grid and axes won't be drawn.
     */
-    #[structopt(short = "A", long = "axisless", verbatim_doc_comment)]
+    #[arg(short = 'A', long = "axisless", verbatim_doc_comment)]
     pub no_axes: bool,
     /** Evaluate plain difference, not proportional to magnitude
 
@@ -26,19 +23,32 @@ pub struct Cli {
     small values. Sometimes certain graphs work better with just plain
     difference, without the division. This flag sets that mode.
     */
-    #[structopt(short, long = "plain", verbatim_doc_comment)]
+    #[arg(short, long = "plain", verbatim_doc_comment)]
     pub plain_diff: bool,
     /** Image dimensions [default: 800, 800]
-    
+
     The width and height must both be greater than zero.
     */
-    #[structopt(short, long, value_names(&["WIDTH", "HEIGHT"]), verbatim_doc_comment)]
+    #[arg(
+        short,
+        long,
+        num_args = 2,
+        value_names = ["WIDTH", "HEIGHT"],
+        verbatim_doc_comment
+    )]
     pub dimensions: Vec<u32>,
     /** View focus on graph [default: 0, 0]
 
     The center of the view area in graph coordinates.
     */
-    #[structopt(short, long, value_names(&["X", "Y"]), verbatim_doc_comment)]
+    #[arg(
+        short,
+        long,
+        num_args = 2,
+        value_names = ["X", "Y"],
+        allow_negative_numbers = true,
+        verbatim_doc_comment
+    )]
     pub focus: Vec<f64>,
     /** Grid size [default: 1]
 
@@ -46,27 +56,27 @@ pub struct Cli {
     shown if the -A/--axisless flag is given. A grid size of zero will turn
     off the grid lines (but leave the axes).
     */
-    #[structopt(
+    #[arg(
         short,
         long,
         default_value = "1",
-        set(clap::ArgSettings::HideDefaultValue),
+        hide_default_value = true,
+        allow_negative_numbers = true,
         verbatim_doc_comment
     )]
     pub grid_size: f64,
     /**Filename of the new image [default: graph.png]
-    
+
     The file extension given will determine the format in which the
     image is saved. Currently only {jpeg, png, ico, bmp, tiff} are supported.
     If the file already exists, it will be overwritten unless it is
     write-protected, in which case the fuzzyplot will give an error.
     */
-    #[structopt(
+    #[arg(
         short,
         long,
-        parse(from_os_str),
         default_value = "graph.png",
-        set(clap::ArgSettings::HideDefaultValue),
+        hide_default_value = true,
         verbatim_doc_comment
     )]
     pub outfile: std::path::PathBuf,
@@ -77,11 +87,12 @@ pub struct Cli {
     the sharpness can sometimes show solutions more clearly, but makes things
     less clear and sometimes reveals false solutions too.
     */
-    #[structopt(
+    #[arg(
         short,
         long,
         default_value = "0",
-        set(clap::ArgSettings::HideDefaultValue),
+        hide_default_value = true,
+        allow_negative_numbers = true,
         verbatim_doc_comment
     )]
     pub sharpness: f64,
@@ -96,7 +107,14 @@ pub struct Cli {
     · ...
     The range given to this argument is the range of n, inclusive.
     */
-    #[structopt(short, long, value_names(&["MIN", "MAX"]), verbatim_doc_comment)]
+    #[arg(
+        short,
+        long,
+        num_args = 2,
+        value_names = ["MIN", "MAX"],
+        allow_negative_numbers = true,
+        verbatim_doc_comment
+    )]
     pub t_range: Vec<i32>,
     /** Zoom level [default: -1]
 
@@ -106,11 +124,12 @@ pub struct Cli {
     images, the shorter distance is taken to be the radius, and the longer
     side scales in proportion.
     */
-    #[structopt(
+    #[arg(
         short,
         long,
         default_value = "-1",
-        set(clap::ArgSettings::HideDefaultValue),
+        hide_default_value = true,
+        allow_negative_numbers = true,
         verbatim_doc_comment
     )]
     pub zoom: f64,
@@ -121,14 +140,13 @@ pub struct Cli {
     generally optional in obvious places. Available symbols are:
     · Operators [ +, -, *, /, ^ ] - e.g. (-x)^3
     · Trig [sin, cos, tan, asin, acos, atan] - e.g. sin(x)
-    · Misc - sqrt(n), abs(n), log(n, base)
+    · Misc - sqrt(n), abs(n), log(n, base), gamma(n)
     · Constants [e, i, pi, tau] - e.g. 2 + 3i
     */
     // allows e.g. "-r=t"
-    #[structopt(
-        allow_hyphen_values(true),
-        required(true),
-        max_values(3),
+    #[arg(
+        required = true,
+        num_args = 1..=3,
         verbatim_doc_comment
     )]
     pub equations: Vec<String>,

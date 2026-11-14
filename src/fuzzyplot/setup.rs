@@ -1,7 +1,6 @@
-use crate::fuzzyplot::{cli::Cli, Plot, Point, Rect};
+use crate::fuzzyplot::{cli::Cli, expr::Compiler, Plot, Point, Rect};
 use anyhow::{anyhow, Context, Result};
-use failure::Fail;
-use rug::Complex;
+use num_complex::Complex64;
 use std::f64::consts::TAU;
 
 #[derive(Debug, Clone, Copy)]
@@ -22,14 +21,6 @@ impl Params {
         // check valid file extension before proceeding
         image::ImageFormat::from_path(args.outfile.as_path())
             .with_context(|| "Unrecognized file extension for image")?;
-
-        // we do a lil baby test to check that the equation is valid
-        let plots_test = make_plots(&args.equations)?;
-        let (lhs_result, rhs_result) =
-            (plots_test[0].lhs_expr.eval(), plots_test[0].rhs_expr.eval());
-        if let Err(e) = lhs_result.and(rhs_result) {
-            return Err(e.compat()).context("Failed to parse equation");
-        }
 
         let size = if args.dimensions.len() == 2 {
             if args.dimensions[0] < 1 || args.dimensions[1] < 1 {
@@ -89,63 +80,56 @@ impl Params {
 }
 
 pub fn make_contexts(
-    p: Point,
+    p: &Point,
     t_range: (i32, i32),
-) -> Vec<mexprp::Context<Complex>> {
-    let x = Complex::with_val(53, (p.x, 0.0));
-    let y = Complex::with_val(53, (p.y, 0.0));
-    let r = Complex::with_val(53, ((p.x.powi(2) + p.y.powi(2)).sqrt(), 0.0));
-    let t = Complex::with_val(53, (p.y.atan2(p.x), 0.0));
+    contexts: &mut Vec<[Complex64; 4]>,
+) {
+    let x = Complex64::new(p.x, 0.0);
+    let y = Complex64::new(p.y, 0.0);
+    let r = (p.x.powi(2) + p.y.powi(2)).sqrt();
+    let t = p.y.atan2(p.x);
 
-    let mut contexts: Vec<mexprp::Context<Complex>> = Vec::new();
+    contexts.clear();
     for i in t_range.0..t_range.1 {
         // accomodate negative r for opposite angle
-        for r_coeff in [1, -1] {
-            let mut context = mexprp::Context::new();
-            context.set_var("tau", Complex::with_val(53, (TAU, 0.0))); // yes
-            context.set_var("x", x.clone());
-            context.set_var("y", y.clone());
-            context.set_var("r", r_coeff * r.clone());
-            if r_coeff == 1 {
-                context.set_var("t", t.clone() + TAU * (i as f64));
-            } else {
-                // if t is negative, turn in positive direction, and vice versa
-                let half_turn = t.real().to_f64().signum() * -TAU / 2.0;
-                context.set_var("t", t.clone() + half_turn + TAU * (i as f64));
-            }
-            contexts.push(context);
-        }
+        contexts.push([
+            x,
+            y,
+            Complex64::new(r, 0.0),
+            Complex64::new(t + TAU * (i as f64), 0.0),
+        ]);
+        // if t is negative, turn in positive direction, and vice versa
+        let half_turn = t.signum() * -TAU / 2.0;
+        contexts.push([
+            x,
+            y,
+            Complex64::new(-r, -0.0),
+            Complex64::new(t + half_turn + TAU * (i as f64), 0.0),
+        ]);
     }
-    contexts
 }
 
-pub fn make_plots(equations: &Vec<String>) -> Result<Vec<Plot>> {
-    let init_context =
-        make_contexts(Point { x: 0.0, y: 0.0 }, (0, 1))[0].clone();
+pub fn context_count(plot: &Plot, contexts: usize) -> usize {
+    let needed = if plot.program.uses_t {
+        contexts
+    } else if plot.program.uses_r {
+        2
+    } else {
+        1
+    };
+    needed.min(contexts)
+}
+
+pub fn make_plots(
+    equations: &Vec<String>,
+    params: &Params,
+) -> Result<Vec<Plot>> {
     let mut plots: Vec<Plot> = Vec::new();
     for (i, equ) in equations.iter().enumerate() {
-        // separate the left and right sides of the equation
-        let split_equ = equ.split("=").collect::<Vec<&str>>();
-        let (lhs, rhs) = if split_equ.len() == 2 {
-            (split_equ[0], split_equ[1])
-        } else {
-            return Err(anyhow!("Equations should have 1 '=' sign"));
-        };
-
-        let lhs_expr =
-            match mexprp::Expression::parse_ctx(lhs, init_context.clone()) {
-                Ok(expr) => expr,
-                Err(e) => {
-                    return Err(e.compat()).context("Failed to parse equation")
-                }
-            };
-        let rhs_expr =
-            match mexprp::Expression::parse_ctx(rhs, init_context.clone()) {
-                Ok(expr) => expr,
-                Err(e) => {
-                    return Err(e.compat()).context("Failed to parse equation")
-                }
-            };
+        let mut compiler = Compiler::new(params.sharpness, params.plain_diff);
+        let result = compiler
+            .expression(equ)
+            .context("Failed to parse equation")?;
 
         // set color to red if only 1 equation, otherwise CMY
         let color = if equations.len() == 1 {
@@ -154,8 +138,8 @@ pub fn make_plots(equations: &Vec<String>) -> Result<Vec<Plot>> {
             0b111 ^ (1 << i)
         };
         let plot = Plot {
-            lhs_expr,
-            rhs_expr,
+            program: compiler.finish(),
+            result,
             color,
         };
         plots.push(plot);

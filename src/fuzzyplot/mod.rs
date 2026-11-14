@@ -1,15 +1,14 @@
-use rug::Complex;
+use std::ops::Range;
 
 pub mod cli;
 pub mod diff;
+pub mod expr;
 pub mod setup;
-
-type Expr = mexprp::Expression<Complex>;
 
 #[derive(Debug)]
 pub struct Plot {
-    pub lhs_expr: Expr,
-    pub rhs_expr: Expr,
+    pub program: expr::Program,
+    pub result: Range<usize>,
     pub color: u8,
 }
 
