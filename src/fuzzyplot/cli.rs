@@ -16,12 +16,25 @@ pub struct Cli {
     */
     #[arg(short = 'A', long = "axisless", verbatim_doc_comment)]
     pub no_axes: bool,
-    /** Evaluate plain difference, not proportional to magnitude
+    /** Evaluate difference in proportion to magnitude (quotient)
 
-    By default, fuzzyplot divides the difference in the equation by the
-    magnitude of the two expressions, in order to counteract the bias toward
-    small values. Sometimes certain graphs work better with just plain
-    difference, without the division. This flag sets that mode.
+    Divide the difference in the equation by the magnitude of the two
+    expressions, in order to counteract the bias toward small values.
+    */
+    #[arg(short, long, conflicts_with = "plain_diff", verbatim_doc_comment)]
+    pub quotient: bool,
+    /** Don't draw poles
+
+    By default, points where an equation's difference is infinite are drawn
+    in the complement of that equation's colour. When this flag is used,
+    only solutions are drawn.
+    */
+    #[arg(short, long, verbatim_doc_comment)]
+    pub no_poles: bool,
+    /** Evaluate plain difference
+
+    Like -q, but without dividing by the magnitude of the expressions.
+    Sometimes certain graphs work better with just the plain difference.
     */
     #[arg(short, long = "plain", verbatim_doc_comment)]
     pub plain_diff: bool,

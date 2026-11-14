@@ -1,4 +1,8 @@
-use crate::fuzzyplot::{cli::Cli, expr::Compiler, Plot, Point, Rect};
+use crate::fuzzyplot::{
+    cli::Cli,
+    expr::{Compiler, Mode},
+    Plot, Point, Rect,
+};
 use anyhow::{anyhow, Context, Result};
 use num_complex::Complex64;
 use std::f64::consts::TAU;
@@ -11,7 +15,8 @@ pub struct Params {
     pub graph_rect: Rect,
     pub graph_pixel_r: f64,
     pub sharpness: f64,
-    pub plain_diff: bool,
+    pub mode: Mode,
+    pub poles: bool,
     pub draw_axes: bool,
     pub grid_size: f64,
 }
@@ -63,7 +68,18 @@ impl Params {
             h: graph_rect_r * 2.0 * y_ratio,
         };
         let graph_pixel_r = graph_rect.w / img_rect.w / 2.0;
-        let sharpness = 2.0_f64.powf(args.sharpness + 8.0);
+        let mode = if args.quotient {
+            Mode::Quotient
+        } else if args.plain_diff {
+            Mode::Plain
+        } else {
+            Mode::Distance
+        };
+        let sharpness = if mode == Mode::Distance {
+            2.0_f64.powf(args.sharpness)
+        } else {
+            2.0_f64.powf(args.sharpness + 8.0)
+        };
 
         Ok(Params {
             size,
@@ -72,7 +88,8 @@ impl Params {
             graph_rect,
             graph_pixel_r,
             sharpness,
-            plain_diff: args.plain_diff,
+            mode,
+            poles: !args.no_poles,
             draw_axes: !args.no_axes,
             grid_size: args.grid_size,
         })
@@ -120,27 +137,38 @@ pub fn context_count(plot: &Plot, contexts: usize) -> usize {
     needed.min(contexts)
 }
 
+fn hue(degrees: f64) -> [f64; 3] {
+    let h = degrees.rem_euclid(360.0) / 60.0;
+    let x = 1.0 - (h % 2.0 - 1.0).abs();
+    match h as u32 {
+        0 => [1.0, x, 0.0],
+        1 => [x, 1.0, 0.0],
+        2 => [0.0, 1.0, x],
+        3 => [0.0, x, 1.0],
+        4 => [x, 0.0, 1.0],
+        _ => [1.0, 0.0, x],
+    }
+}
+
 pub fn make_plots(
     equations: &Vec<String>,
     params: &Params,
 ) -> Result<Vec<Plot>> {
     let mut plots: Vec<Plot> = Vec::new();
     for (i, equ) in equations.iter().enumerate() {
-        let mut compiler = Compiler::new(params.sharpness, params.plain_diff);
-        let result = compiler
+        let mut compiler =
+            Compiler::new(params.sharpness, params.mode, params.poles);
+        let (zeros, poles) = compiler
             .expression(equ)
             .context("Failed to parse equation")?;
 
-        // set color to red if only 1 equation, otherwise CMY
-        let color = if equations.len() == 1 {
-            0b001
-        } else {
-            0b111 ^ (1 << i)
-        };
+        let angle = 180.0 * i as f64 / equations.len() as f64;
         let plot = Plot {
             program: compiler.finish(),
-            result,
-            color,
+            zeros,
+            poles,
+            zero_color: hue(angle),
+            pole_color: hue(angle + 180.0),
         };
         plots.push(plot);
     }

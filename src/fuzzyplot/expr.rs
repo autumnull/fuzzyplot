@@ -3,7 +3,12 @@ use num_complex::Complex64 as C64;
 use std::f64::consts::{E, PI, TAU};
 use std::ops::Range;
 
-pub const LANES: usize = 64;
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Mode {
+    Distance,
+    Quotient,
+    Plain,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Op {
@@ -417,14 +422,24 @@ enum Inst {
     },
     Eq {
         args: Vec<Range<usize>>,
+        mode: Mode,
         sharpness: f64,
-        plain: bool,
+        complement: bool,
+        scratch: usize,
+        dst: usize,
+    },
+    Final {
+        arg: Range<usize>,
+        sharpness: f64,
+        poles: bool,
+        scratch: usize,
         dst: usize,
     },
 }
 
 impl Inst {
-    fn exec(&self, buf: &mut [C64], lanes: usize) {
+    fn exec(&self, buf: &mut [C64], width: usize) {
+        let lanes = width * width;
         match self {
             Inst::Bin { op, a, b, dst } => {
                 let (src, out) = buf.split_at_mut(dst * lanes);
@@ -512,47 +527,174 @@ impl Inst {
             }
             Inst::Eq {
                 args,
+                mode,
                 sharpness,
-                plain,
+                complement,
+                scratch,
                 dst,
             } => {
-                let (src, out) = buf.split_at_mut(dst * lanes);
+                let (src, rest) = buf.split_at_mut(scratch * lanes);
                 let src = &*src;
+                let (spreads, rest) = rest.split_at_mut(lanes);
+                let outputs = if *complement { 2 } else { 1 };
+                let out =
+                    &mut rest[(dst - scratch - 1) * lanes..][..outputs * lanes];
+                let (out, complements) = out.split_at_mut(lanes);
                 let n = args.len() as f64;
                 let combos: usize = args.iter().map(|arg| arg.len()).product();
-                for lane in 0..lanes {
-                    let mut min_d = f64::INFINITY;
-                    for combo in 0..combos {
-                        let values = || {
-                            let mut k = combo;
-                            args.iter().map(move |arg| {
-                                let slot = arg.start + k % arg.len();
-                                k /= arg.len();
-                                src[slot * lanes + lane]
-                            })
-                        };
-                        let mean = values().sum::<C64>() / n;
-                        let spread: f64 =
-                            values().map(|z| (z - mean).norm_sqr()).sum();
-                        let d = if *plain {
-                            2.0 * spread / (n - 1.0)
+                let values = |lane: usize, combo: usize| {
+                    let mut k = combo;
+                    args.iter().map(move |arg| {
+                        let slot = arg.start + k % arg.len();
+                        k /= arg.len();
+                        src[slot * lanes + lane]
+                    })
+                };
+                let negated = |lane: usize, combo: usize| {
+                    values(lane, combo).enumerate().map(|(i, z)| {
+                        if i == 1 {
+                            -z
                         } else {
-                            let total: f64 =
-                                values().map(|z| z.norm_sqr()).sum();
-                            if total == 0.0 {
-                                0.0
-                            } else {
-                                spread / total
+                            z
+                        }
+                    })
+                };
+                let spread = |lane: usize, combo: usize| -> f64 {
+                    let mean = values(lane, combo).sum::<C64>() / n;
+                    values(lane, combo).map(|z| (z - mean).norm_sqr()).sum()
+                };
+                let negated_spread = |lane: usize, combo: usize| -> f64 {
+                    let mean = negated(lane, combo).sum::<C64>() / n;
+                    negated(lane, combo).map(|z| (z - mean).norm_sqr()).sum()
+                };
+                for out in out.iter_mut().chain(complements.iter_mut()) {
+                    *out = C64::new(f64::INFINITY, 0.0);
+                }
+                for combo in 0..combos {
+                    if *mode == Mode::Distance {
+                        for (lane, s) in spreads.iter_mut().enumerate() {
+                            let points = values(lane, combo).map(project);
+                            *s = C64::new(sphere_spread(points, n), 0.0);
+                        }
+                    }
+                    for (lane, out) in out.iter_mut().enumerate() {
+                        let d = match mode {
+                            Mode::Distance => {
+                                pixel_distance(spreads, width, lane)
+                            }
+                            Mode::Quotient => {
+                                let total: f64 = values(lane, combo)
+                                    .map(|z| z.norm_sqr())
+                                    .sum();
+                                if total == 0.0 {
+                                    0.0
+                                } else {
+                                    spread(lane, combo) / total
+                                }
+                            }
+                            Mode::Plain => {
+                                2.0 * spread(lane, combo) / (n - 1.0)
                             }
                         };
-                        min_d = min_d.min(d);
+                        out.re = out.re.min(d);
                     }
-                    let closeness =
-                        ((min_d * sharpness).powi(2) + 1.0).powi(-1);
-                    out[lane] = C64::new(closeness, 0.0);
+                    for (lane, out) in complements.iter_mut().enumerate() {
+                        let d = match mode {
+                            Mode::Quotient => {
+                                let total: f64 = values(lane, combo)
+                                    .map(|z| z.norm_sqr())
+                                    .sum();
+                                if total == 0.0 {
+                                    0.0
+                                } else {
+                                    negated_spread(lane, combo) / total
+                                }
+                            }
+                            _ => (n - 1.0) / (2.0 * spread(lane, combo)),
+                        };
+                        out.re = out.re.min(d);
+                    }
+                }
+                for out in out.iter_mut().chain(complements.iter_mut()) {
+                    *out = closeness(out.re, *sharpness);
+                }
+            }
+            Inst::Final {
+                arg,
+                sharpness,
+                poles,
+                scratch,
+                dst,
+            } => {
+                let (src, rest) = buf.split_at_mut(scratch * lanes);
+                let src = &*src;
+                let (spreads, rest) = rest.split_at_mut(2 * lanes);
+                let (zero_spreads, pole_spreads) = spreads.split_at_mut(lanes);
+                let out = &mut rest[(dst - scratch - 2) * lanes..][..2 * lanes];
+                let (zeros, pole_out) = out.split_at_mut(lanes);
+                for out in zeros.iter_mut().chain(pole_out.iter_mut()) {
+                    *out = C64::new(f64::INFINITY, 0.0);
+                }
+                for slot in arg.clone() {
+                    for lane in 0..lanes {
+                        let p = project(src[slot * lanes + lane]);
+                        let zero = [p, project(C64::new(0.0, 0.0))];
+                        zero_spreads[lane] = C64::new(
+                            sphere_spread(IntoIterator::into_iter(zero), 2.0),
+                            0.0,
+                        );
+                        let pole = [p, [0.0, 0.0, 1.0]];
+                        pole_spreads[lane] = C64::new(
+                            sphere_spread(IntoIterator::into_iter(pole), 2.0),
+                            0.0,
+                        );
+                    }
+                    for lane in 0..lanes {
+                        let d = pixel_distance(zero_spreads, width, lane);
+                        zeros[lane].re = zeros[lane].re.min(d);
+                        if *poles {
+                            let d = pixel_distance(pole_spreads, width, lane);
+                            pole_out[lane].re = pole_out[lane].re.min(d);
+                        }
+                    }
+                }
+                for out in zeros.iter_mut().chain(pole_out.iter_mut()) {
+                    *out = closeness(out.re, *sharpness);
                 }
             }
         }
+    }
+}
+
+fn closeness(distance: f64, sharpness: f64) -> C64 {
+    C64::new(((distance * sharpness).powi(2) + 1.0).powi(-1), 0.0)
+}
+
+fn sphere_spread(
+    points: impl Iterator<Item = [f64; 3]> + Clone,
+    n: f64,
+) -> f64 {
+    let mut mean = [0.0; 3];
+    for p in points.clone() {
+        for (m, p) in mean.iter_mut().zip(p) {
+            *m += p / n;
+        }
+    }
+    points
+        .map(|p| (0..3).map(|i| (p[i] - mean[i]).powi(2)).sum::<f64>())
+        .sum()
+}
+
+fn pixel_distance(spreads: &[C64], width: usize, lane: usize) -> f64 {
+    let at = |x: usize, y: usize| spreads[y * width + x].re;
+    let (x, y) = (lane % width, lane / width);
+    let s = at(x, y);
+    let gx = at((x + 1).min(width - 1), y) - at(x.saturating_sub(1), y);
+    let gy = at(x, (y + 1).min(width - 1)) - at(x, y.saturating_sub(1));
+    if s == 0.0 {
+        0.0
+    } else {
+        4.0 * s / gx.hypot(gy)
     }
 }
 
@@ -582,6 +724,19 @@ fn cartesian(
                 *out = f(a, b);
             }
         }
+    }
+}
+
+fn project(z: C64) -> [f64; 3] {
+    let n = z.norm_sqr();
+    if n.is_finite() {
+        [
+            2.0 * z.re / (n + 1.0),
+            2.0 * z.im / (n + 1.0),
+            (n - 1.0) / (n + 1.0),
+        ]
+    } else {
+        [0.0, 0.0, 1.0]
     }
 }
 
@@ -702,8 +857,10 @@ pub struct Compiler {
     insts: Vec<Inst>,
     uses_r: bool,
     uses_t: bool,
+    depth: usize,
     sharpness: f64,
-    plain: bool,
+    mode: Mode,
+    poles: bool,
 }
 
 #[derive(Debug)]
@@ -712,11 +869,18 @@ pub struct Program {
     insts: Vec<Inst>,
     pub uses_r: bool,
     pub uses_t: bool,
+    pub halo: usize,
+}
+
+pub struct Scratch {
+    buf: Vec<C64>,
+    width: usize,
 }
 
 struct Operand {
     range: Range<usize>,
     is_const: bool,
+    depth: usize,
 }
 
 enum Item {
@@ -725,21 +889,59 @@ enum Item {
 }
 
 impl Compiler {
-    pub fn new(sharpness: f64, plain: bool) -> Compiler {
+    pub fn new(sharpness: f64, mode: Mode, poles: bool) -> Compiler {
         Compiler {
             init: vec![C64::new(0.0, 0.0); 4],
             insts: Vec::new(),
             uses_r: false,
             uses_t: false,
+            depth: 0,
             sharpness,
-            plain,
+            mode,
+            poles,
         }
     }
 
-    pub fn expression(&mut self, raw: &str) -> Result<Range<usize>> {
+    pub fn expression(
+        &mut self,
+        raw: &str,
+    ) -> Result<(Range<usize>, Option<Range<usize>>)> {
         let tokens = to_paren_tokens(&tokenize(raw)?)?;
         let postfix = to_postfix(insert_operators(paren_to_exprs(tokens)?));
-        Ok(self.compile(postfix)?.range)
+        if self.mode != Mode::Distance {
+            let (operand, complement) = match self.compile_item(postfix)? {
+                Item::Chain(args) if args.len() == 2 && self.poles => {
+                    let operand = self.eq(args, true);
+                    let start = operand.range.start;
+                    (operand, Some(start + 1..start + 2))
+                }
+                item => (self.value(item), None),
+            };
+            self.depth = self.depth.max(operand.depth);
+            let start = operand.range.start;
+            let zeros = if complement.is_some() {
+                start..start + 1
+            } else {
+                operand.range
+            };
+            return Ok((zeros, complement));
+        }
+        let mut operand = self.compile(postfix)?;
+        let (sharpness, poles) = (self.sharpness, self.poles);
+        let scratch = self.alloc(2);
+        let arg = operand.range.clone();
+        operand = self.emit(2, &[&operand], |dst| Inst::Final {
+            arg,
+            sharpness,
+            poles,
+            scratch,
+            dst,
+        });
+        operand.depth += 1;
+        self.depth = self.depth.max(operand.depth);
+        let zeros = operand.range.start..operand.range.start + 1;
+        let poles = operand.range.start + 1..operand.range.end;
+        Ok((zeros, if self.poles { Some(poles) } else { None }))
     }
 
     pub fn finish(self) -> Program {
@@ -748,6 +950,11 @@ impl Compiler {
             insts: self.insts,
             uses_r: self.uses_r,
             uses_t: self.uses_t,
+            halo: if self.mode == Mode::Distance {
+                self.depth
+            } else {
+                0
+            },
         }
     }
 
@@ -772,6 +979,7 @@ impl Compiler {
         Operand {
             range: start..start + 1,
             is_const: true,
+            depth: 0,
         }
     }
 
@@ -792,24 +1000,46 @@ impl Compiler {
         Operand {
             range: dst..dst + len,
             is_const,
+            depth: inputs.iter().map(|i| i.depth).max().unwrap_or(0),
         }
     }
 
     fn value(&mut self, item: Item) -> Operand {
         match item {
             Item::Value(operand) => operand,
-            Item::Chain(args) => {
-                let ranges = args.iter().map(|a| a.range.clone()).collect();
-                let inputs: Vec<&Operand> = args.iter().collect();
-                let (sharpness, plain) = (self.sharpness, self.plain);
-                self.emit(1, &inputs, |dst| Inst::Eq {
-                    args: ranges,
-                    sharpness,
-                    plain,
-                    dst,
+            Item::Chain(args)
+                if args.len() == 2 && self.mode == Mode::Distance =>
+            {
+                let (a, b) = (args[0].range.clone(), args[1].range.clone());
+                self.emit(a.len() * b.len(), &[&args[0], &args[1]], |dst| {
+                    Inst::Bin {
+                        op: BinOp::Sub,
+                        a,
+                        b,
+                        dst,
+                    }
                 })
             }
+            Item::Chain(args) => self.eq(args, false),
         }
+    }
+
+    fn eq(&mut self, args: Vec<Operand>, complement: bool) -> Operand {
+        let ranges = args.iter().map(|a| a.range.clone()).collect();
+        let inputs: Vec<&Operand> = args.iter().collect();
+        let (sharpness, mode) = (self.sharpness, self.mode);
+        let scratch = self.alloc(1);
+        let outputs = if complement { 2 } else { 1 };
+        let mut operand = self.emit(outputs, &inputs, |dst| Inst::Eq {
+            args: ranges,
+            mode,
+            sharpness,
+            complement,
+            scratch,
+            dst,
+        });
+        operand.depth += 1;
+        operand
     }
 
     fn pop(&mut self, stack: &mut Vec<Item>) -> Result<Operand> {
@@ -818,6 +1048,11 @@ impl Compiler {
     }
 
     fn compile(&mut self, postfix: Vec<Expr>) -> Result<Operand> {
+        let item = self.compile_item(postfix)?;
+        Ok(self.value(item))
+    }
+
+    fn compile_item(&mut self, postfix: Vec<Expr>) -> Result<Item> {
         let mut stack: Vec<Item> = Vec::new();
         for expr in postfix {
             if let Expr::Op(Op::Eq) = expr {
@@ -914,13 +1149,14 @@ impl Compiler {
                 Expected another operator"
             ));
         }
-        self.pop(&mut stack)
+        stack.pop().ok_or_else(missing)
     }
 
     fn variable(&mut self, name: &str) -> Result<Operand> {
         let var = |v: Var| Operand {
             range: v as usize..v as usize + 1,
             is_const: false,
+            depth: 0,
         };
         Ok(match name {
             "x" => var(Var::X),
@@ -1010,31 +1246,38 @@ impl Compiler {
 }
 
 impl Program {
-    pub fn buffer(&self) -> Vec<C64> {
-        self.init
-            .iter()
-            .flat_map(|&v| std::iter::repeat(v).take(LANES))
-            .collect()
-    }
-
-    pub fn set_vars(&self, buf: &mut [C64], lane: usize, vars: [C64; 4]) {
-        for (slot, &var) in vars.iter().enumerate() {
-            buf[slot * LANES + lane] = var;
+    pub fn scratch(&self, width: usize) -> Scratch {
+        let lanes = width * width;
+        Scratch {
+            buf: self
+                .init
+                .iter()
+                .flat_map(|&v| std::iter::repeat(v).take(lanes))
+                .collect(),
+            width,
         }
     }
 
-    pub fn eval(&self, buf: &mut [C64]) {
+    pub fn set_vars(&self, scratch: &mut Scratch, lane: usize, vars: [C64; 4]) {
+        let lanes = scratch.width * scratch.width;
+        for (slot, &var) in vars.iter().enumerate() {
+            scratch.buf[slot * lanes + lane] = var;
+        }
+    }
+
+    pub fn eval(&self, scratch: &mut Scratch) {
         for inst in &self.insts {
-            inst.exec(buf, LANES);
+            inst.exec(&mut scratch.buf, scratch.width);
         }
     }
 
     pub fn results<'a>(
         &self,
-        buf: &'a [C64],
+        scratch: &'a Scratch,
         range: Range<usize>,
         lane: usize,
     ) -> impl Iterator<Item = C64> + 'a {
-        range.map(move |slot| buf[slot * LANES + lane])
+        let lanes = scratch.width * scratch.width;
+        range.map(move |slot| scratch.buf[slot * lanes + lane])
     }
 }

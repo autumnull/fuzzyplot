@@ -8,8 +8,10 @@ pub mod setup;
 #[derive(Debug)]
 pub struct Plot {
     pub program: expr::Program,
-    pub result: Range<usize>,
-    pub color: u8,
+    pub zeros: Range<usize>,
+    pub poles: Option<Range<usize>>,
+    pub zero_color: [f64; 3],
+    pub pole_color: [f64; 3],
 }
 
 #[derive(Debug)]

@@ -65,4 +65,8 @@ By default, `fuzzyplot` divides the difference in the equation by the magnitude 
 
 ![](images/flower.png)
 
+`fuzzyplot "1/sin (y+1 = sin x^2) + tan r" -z -3`
+![](images/vibrations.png)
+
 ![](images/eqn8.svg)
+
