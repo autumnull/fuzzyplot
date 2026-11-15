@@ -3,6 +3,7 @@ use std::ops::Range;
 pub mod cli;
 pub mod diff;
 pub mod expr;
+pub mod random;
 pub mod setup;
 
 #[derive(Debug)]

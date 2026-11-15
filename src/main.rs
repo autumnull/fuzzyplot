@@ -1,4 +1,4 @@
-use crate::fuzzyplot::{cli::Cli, diff, setup, setup::Params, Point};
+use crate::fuzzyplot::{cli::Cli, diff, random, setup, setup::Params, Point};
 use anyhow::{Context, Result};
 use clap::Parser;
 use image::RgbImage;
@@ -13,7 +13,20 @@ fn main() -> Result<()> {
     let args = Cli::parse();
 
     let params = Params::from_args(&args)?;
-    let plots = setup::make_plots(&args.equations, &params)?;
+    let equations = match args.random {
+        Some(count) => {
+            let mut rng = fastrand::Rng::new();
+            let equations: Vec<String> = (0..count)
+                .map(|_| random::equation(&mut rng, args.length))
+                .collect();
+            for equation in &equations {
+                println!("{}", equation);
+            }
+            equations
+        }
+        None => args.equations.clone(),
+    };
+    let plots = setup::make_plots(&equations, &params)?;
     let (width, height) = params.size;
     let halo = plots
         .iter()

@@ -58,7 +58,6 @@ enum Token {
     Op(Op),
     Name(String),
     Num(f64),
-    Comma,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +66,6 @@ enum ParenToken {
     Num(f64),
     Name(String),
     Sub(Vec<ParenToken>),
-    Comma,
 }
 
 #[derive(Debug, Clone)]
@@ -85,26 +83,19 @@ impl Expr {
     }
 }
 
-const FUNCS: [&str; 16] = [
-    "sin", "cos", "max", "min", "sqrt", "nrt", "tan", "abs", "asin", "acos",
-    "atan", "atant", "floor", "round", "log", "gamma",
-];
-
-const UNARY_FUNCS: [&str; 11] = [
-    "sin", "cos", "tan", "asin", "acos", "atan", "sqrt", "abs", "floor",
-    "round", "gamma",
-];
-
-fn is_func(token: &ParenToken) -> bool {
-    match token {
-        ParenToken::Name(name) => FUNCS.contains(&name.as_str()),
-        _ => false,
+fn arity(name: &str) -> Option<usize> {
+    match name {
+        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sqrt" | "abs"
+        | "floor" | "round" | "gamma" | "zeta" | "re" | "im" | "conj"
+        | "arg" => Some(1),
+        "log" | "root" | "max" | "min" => Some(2),
+        _ => None,
     }
 }
 
-fn is_unary_func(token: &ParenToken) -> bool {
+fn is_func(token: &ParenToken) -> bool {
     match token {
-        ParenToken::Name(name) => UNARY_FUNCS.contains(&name.as_str()),
+        ParenToken::Name(name) => arity(name).is_some(),
         _ => false,
     }
 }
@@ -124,16 +115,14 @@ fn tokenize(raw: &str) -> Result<Vec<Token>> {
         rest = rest.trim_start();
         let c = rest.chars().next().unwrap();
         let expects_operand = match tokens.last() {
-            None | Some(Token::Open) | Some(Token::Comma) => true,
+            None | Some(Token::Open) => true,
             Some(Token::Op(op)) => !op.is_postfix(),
-            Some(Token::Name(name)) => UNARY_FUNCS.contains(&name.as_str()),
+            Some(Token::Name(name)) => arity(name).is_some(),
             _ => false,
         };
-        let after_num = matches!(tokens.last(), Some(Token::Num(_)));
         let (token, len) = match c {
             '(' => (Token::Open, 1),
             ')' => (Token::Close, 1),
-            ',' if !expects_operand => (Token::Comma, 1),
             '-' if expects_operand => (Token::Op(Op::Neg), 1),
             '+' if expects_operand => (Token::Op(Op::Pos), 1),
             '±' if expects_operand => (Token::Op(Op::PosNeg), c.len_utf8()),
@@ -156,7 +145,7 @@ fn tokenize(raw: &str) -> Result<Vec<Token>> {
                     .unwrap_or(rest.len());
                 (Token::Name(rest[..len].to_string()), len)
             }
-            c if (c.is_ascii_digit() || c == '.') && !after_num => {
+            c if c.is_ascii_digit() || c == '.' => {
                 let len = rest
                     .find(|c: char| !(c.is_ascii_digit() || c == '.'))
                     .unwrap_or(rest.len());
@@ -205,7 +194,6 @@ fn to_paren_tokens(tokens: &[Token]) -> Result<Vec<ParenToken>> {
                 paren_tokens.push(ParenToken::Name(name.clone()))
             }
             Token::Num(num) => paren_tokens.push(ParenToken::Num(*num)),
-            Token::Comma => paren_tokens.push(ParenToken::Comma),
         }
     }
     if depth != 0 {
@@ -219,29 +207,62 @@ fn paren_to_exprs(raw: Vec<ParenToken>) -> Result<Vec<Expr>> {
     let mut tokens = raw.into_iter().peekable();
     while let Some(token) = tokens.next() {
         match token {
-            ParenToken::Name(name) if FUNCS.contains(&name.as_str()) => {
-                if let Some(ParenToken::Sub(_)) = tokens.peek() {
-                    if let Some(ParenToken::Sub(sub)) = tokens.next() {
-                        exprs.push(Expr::Func(name, tokens_to_args(sub)?));
-                    }
-                } else if UNARY_FUNCS.contains(&name.as_str()) {
-                    let arg = take_argument(&mut tokens);
-                    exprs.push(Expr::Func(name, vec![paren_to_exprs(arg)?]));
-                } else {
-                    exprs.push(Expr::Var(name));
-                }
+            ParenToken::Name(name) if arity(&name).is_some() => {
+                let args = take_call(&name, &mut tokens)
+                    .into_iter()
+                    .map(paren_to_exprs)
+                    .collect::<Result<_>>()?;
+                exprs.push(Expr::Func(name, args));
             }
             ParenToken::Name(name) => exprs.push(Expr::Var(name)),
             ParenToken::Sub(sub) => exprs.push(Expr::Sub(paren_to_exprs(sub)?)),
-            ParenToken::Num(num) => exprs.push(Expr::Num(num)),
+            ParenToken::Num(num) => {
+                if let Some(Expr::Num(_)) = exprs.last() {
+                    return Err(unexpected(&num.to_string()));
+                }
+                exprs.push(Expr::Num(num))
+            }
             ParenToken::Op(op) => exprs.push(Expr::Op(op)),
-            ParenToken::Comma => return Err(unexpected(",")),
         }
     }
     Ok(exprs)
 }
 
 type Tokens = std::iter::Peekable<std::vec::IntoIter<ParenToken>>;
+
+fn take_call(name: &str, tokens: &mut Tokens) -> Vec<Vec<ParenToken>> {
+    let n = arity(name).unwrap_or(0);
+    let mut args: Vec<_> = (1..n).map(|_| take_power(tokens)).collect();
+    if n > 0 {
+        args.push(match tokens.peek() {
+            Some(ParenToken::Sub(_)) => tokens.next().into_iter().collect(),
+            _ => take_argument(tokens),
+        });
+    }
+    args
+}
+
+fn take_power(tokens: &mut Tokens) -> Vec<ParenToken> {
+    let mut arg = Vec::new();
+    if !take_factor(tokens, &mut arg) {
+        return arg;
+    }
+    loop {
+        match tokens.peek() {
+            Some(ParenToken::Op(Op::Pow)) => {
+                arg.extend(tokens.next());
+                if !take_factor(tokens, &mut arg) {
+                    break;
+                }
+            }
+            Some(ParenToken::Op(op)) if op.is_postfix() => {
+                arg.extend(tokens.next())
+            }
+            _ => break,
+        }
+    }
+    arg
+}
 
 fn take_argument(tokens: &mut Tokens) -> Vec<ParenToken> {
     let mut arg = Vec::new();
@@ -276,13 +297,11 @@ fn take_factor(tokens: &mut Tokens, arg: &mut Vec<ParenToken>) -> bool {
         arg.extend(tokens.next());
     }
     match tokens.peek() {
-        Some(t) if is_func(t) => {
-            let unary = tokens.peek().map_or(false, is_unary_func);
+        Some(ParenToken::Name(name)) if arity(name).is_some() => {
+            let name = name.clone();
             arg.extend(tokens.next());
-            if let Some(ParenToken::Sub(_)) = tokens.peek() {
-                arg.extend(tokens.next());
-            } else if unary {
-                arg.push(ParenToken::Sub(take_argument(tokens)));
+            for call_arg in take_call(&name, tokens) {
+                arg.push(ParenToken::Sub(call_arg));
             }
             true
         }
@@ -294,13 +313,6 @@ fn take_factor(tokens: &mut Tokens, arg: &mut Vec<ParenToken>) -> bool {
         }
         _ => false,
     }
-}
-
-fn tokens_to_args(raw: Vec<ParenToken>) -> Result<Vec<Vec<Expr>>> {
-    raw.split(|t| matches!(t, ParenToken::Comma))
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| paren_to_exprs(arg.to_vec()))
-        .collect()
 }
 
 fn insert_operators(mut raw: Vec<Expr>) -> Vec<Expr> {
@@ -366,6 +378,8 @@ enum BinOp {
     Div,
     Pow,
     Log,
+    SphereDiff,
+    Quotient,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -382,6 +396,11 @@ enum UnOp {
     Floor,
     Round,
     Gamma,
+    Zeta,
+    Re,
+    Im,
+    Conj,
+    Arg,
 }
 
 #[derive(Debug, Clone)]
@@ -415,21 +434,24 @@ enum Inst {
         a: Range<usize>,
         dst: usize,
     },
+    Root {
+        a: Range<usize>,
+        n: usize,
+        dst: usize,
+    },
     MinMax {
         max: bool,
         args: Vec<Range<usize>>,
         dst: usize,
     },
-    Eq {
+    Spread {
         args: Vec<Range<usize>>,
         mode: Mode,
-        sharpness: f64,
-        complement: bool,
-        scratch: usize,
         dst: usize,
     },
     Final {
         arg: Range<usize>,
+        mode: Mode,
         sharpness: f64,
         poles: bool,
         scratch: usize,
@@ -452,6 +474,16 @@ impl Inst {
                     BinOp::Pow => cartesian(a, b, out, lanes, pow),
                     BinOp::Log => cartesian(a, b, out, lanes, |a, b| {
                         div(a.log10(), b.log10())
+                    }),
+                    BinOp::SphereDiff => {
+                        cartesian(a, b, out, lanes, sphere_difference)
+                    }
+                    BinOp::Quotient => cartesian(a, b, out, lanes, |a, b| {
+                        if a == b {
+                            C64::new(0.0, 0.0)
+                        } else {
+                            div(a - b, a + b)
+                        }
                     }),
                 }
             }
@@ -494,6 +526,11 @@ impl Inst {
                         map(a, out, |a| C64::new(a.re.round(), a.im.round()))
                     }
                     UnOp::Gamma => map(a, out, gamma),
+                    UnOp::Zeta => map(a, out, zeta),
+                    UnOp::Re => map(a, out, |a| C64::new(a.re, 0.0)),
+                    UnOp::Im => map(a, out, |a| C64::new(a.im, 0.0)),
+                    UnOp::Conj => map(a, out, |a| a.conj()),
+                    UnOp::Arg => map(a, out, |a| C64::new(a.arg(), 0.0)),
                 }
             }
             Inst::Sqrt { a, dst } => {
@@ -503,6 +540,21 @@ impl Inst {
                     let pos = out.next().unwrap();
                     map(a, pos, C64::sqrt);
                     map(pos, out.next().unwrap(), |r| -r);
+                }
+            }
+            Inst::Root { a, n, dst } => {
+                let (src, out) = buf.split_at_mut(dst * lanes);
+                let mut out = out.chunks_exact_mut(lanes);
+                for a in slots(src, a, lanes).chunks_exact(lanes) {
+                    for k in 0..*n {
+                        map(a, out.next().unwrap(), |a| {
+                            let theta = (a.arg() + TAU * k as f64) / *n as f64;
+                            C64::from_polar(
+                                a.norm().powf(1.0 / *n as f64),
+                                theta,
+                            )
+                        });
+                    }
                 }
             }
             Inst::MinMax { max, args, dst } => {
@@ -525,102 +577,62 @@ impl Inst {
                     out[lane] = best;
                 }
             }
-            Inst::Eq {
-                args,
-                mode,
-                sharpness,
-                complement,
-                scratch,
-                dst,
-            } => {
-                let (src, rest) = buf.split_at_mut(scratch * lanes);
+            Inst::Spread { args, mode, dst } => {
+                let (src, out) = buf.split_at_mut(dst * lanes);
                 let src = &*src;
-                let (spreads, rest) = rest.split_at_mut(lanes);
-                let outputs = if *complement { 2 } else { 1 };
-                let out =
-                    &mut rest[(dst - scratch - 1) * lanes..][..outputs * lanes];
-                let (out, complements) = out.split_at_mut(lanes);
                 let n = args.len() as f64;
                 let combos: usize = args.iter().map(|arg| arg.len()).product();
-                let values = |lane: usize, combo: usize| {
-                    let mut k = combo;
-                    args.iter().map(move |arg| {
-                        let slot = arg.start + k % arg.len();
-                        k /= arg.len();
-                        src[slot * lanes + lane]
-                    })
-                };
-                let negated = |lane: usize, combo: usize| {
-                    values(lane, combo).enumerate().map(|(i, z)| {
-                        if i == 1 {
-                            -z
+                for (lane, out) in out[..lanes].iter_mut().enumerate() {
+                    let mut best = f64::INFINITY;
+                    for combo in 0..combos {
+                        let values = || {
+                            let mut k = combo;
+                            args.iter().map(move |arg| {
+                                let slot = arg.start + k % arg.len();
+                                k /= arg.len();
+                                src[slot * lanes + lane]
+                            })
+                        };
+                        if *mode == Mode::Distance {
+                            let mut chords = 0.0;
+                            for (i, a) in values().map(project).enumerate() {
+                                for b in values().map(project).skip(i + 1) {
+                                    chords += (0..3)
+                                        .map(|k| (a[k] - b[k]).powi(2))
+                                        .sum::<f64>();
+                                }
+                            }
+                            let q = chords / (n * n);
+                            best = best.min((q / (1.0 - q)).sqrt());
+                            continue;
+                        }
+                        let mut pairs = 0.0;
+                        for (i, a) in values().enumerate() {
+                            for b in values().skip(i + 1) {
+                                pairs += (a - b).norm_sqr();
+                            }
+                        }
+                        let squared = pairs / (n * (n - 1.0) / 2.0);
+                        let z = if *mode == Mode::Quotient {
+                            let total: f64 =
+                                values().map(|z| z.norm_sqr()).sum();
+                            let q = if total == 0.0 {
+                                0.0
+                            } else {
+                                squared * (n - 1.0) / (2.0 * total)
+                            };
+                            (q / (1.0 - q)).sqrt()
                         } else {
-                            z
-                        }
-                    })
-                };
-                let spread = |lane: usize, combo: usize| -> f64 {
-                    let mean = values(lane, combo).sum::<C64>() / n;
-                    values(lane, combo).map(|z| (z - mean).norm_sqr()).sum()
-                };
-                let negated_spread = |lane: usize, combo: usize| -> f64 {
-                    let mean = negated(lane, combo).sum::<C64>() / n;
-                    negated(lane, combo).map(|z| (z - mean).norm_sqr()).sum()
-                };
-                for out in out.iter_mut().chain(complements.iter_mut()) {
-                    *out = C64::new(f64::INFINITY, 0.0);
-                }
-                for combo in 0..combos {
-                    if *mode == Mode::Distance {
-                        for (lane, s) in spreads.iter_mut().enumerate() {
-                            let points = values(lane, combo).map(project);
-                            *s = C64::new(sphere_spread(points, n), 0.0);
-                        }
-                    }
-                    for (lane, out) in out.iter_mut().enumerate() {
-                        let d = match mode {
-                            Mode::Distance => {
-                                pixel_distance(spreads, width, lane)
-                            }
-                            Mode::Quotient => {
-                                let total: f64 = values(lane, combo)
-                                    .map(|z| z.norm_sqr())
-                                    .sum();
-                                if total == 0.0 {
-                                    0.0
-                                } else {
-                                    spread(lane, combo) / total
-                                }
-                            }
-                            Mode::Plain => {
-                                2.0 * spread(lane, combo) / (n - 1.0)
-                            }
+                            squared.sqrt()
                         };
-                        out.re = out.re.min(d);
+                        best = best.min(z);
                     }
-                    for (lane, out) in complements.iter_mut().enumerate() {
-                        let d = match mode {
-                            Mode::Quotient => {
-                                let total: f64 = values(lane, combo)
-                                    .map(|z| z.norm_sqr())
-                                    .sum();
-                                if total == 0.0 {
-                                    0.0
-                                } else {
-                                    negated_spread(lane, combo) / total
-                                }
-                            }
-                            _ => (n - 1.0) / (2.0 * spread(lane, combo)),
-                        };
-                        out.re = out.re.min(d);
-                    }
-                }
-                for out in out.iter_mut().chain(complements.iter_mut()) {
-                    *out = closeness(out.re, *sharpness);
+                    *out = C64::new(best, 0.0);
                 }
             }
             Inst::Final {
                 arg,
+                mode,
                 sharpness,
                 poles,
                 scratch,
@@ -636,6 +648,23 @@ impl Inst {
                     *out = C64::new(f64::INFINITY, 0.0);
                 }
                 for slot in arg.clone() {
+                    if *mode != Mode::Distance {
+                        for lane in 0..lanes {
+                            let n2 = src[slot * lanes + lane].norm_sqr();
+                            let (zero, pole) = if *mode == Mode::Plain {
+                                (n2, 1.0 / n2)
+                            } else if n2.is_finite() {
+                                (n2 / (1.0 + n2), 1.0 / (1.0 + n2))
+                            } else {
+                                (1.0, 0.0)
+                            };
+                            zeros[lane].re = zeros[lane].re.min(zero);
+                            if *poles {
+                                pole_out[lane].re = pole_out[lane].re.min(pole);
+                            }
+                        }
+                        continue;
+                    }
                     for lane in 0..lanes {
                         let p = project(src[slot * lanes + lane]);
                         let zero = [p, project(C64::new(0.0, 0.0))];
@@ -740,6 +769,19 @@ fn project(z: C64) -> [f64; 3] {
     }
 }
 
+fn sphere_difference(a: C64, b: C64) -> C64 {
+    let (a_inf, b_inf) = (a.is_infinite(), b.is_infinite());
+    if a == b || (a_inf && b_inf) {
+        C64::new(0.0, 0.0)
+    } else if a_inf {
+        C64::new(1.0 / b.norm(), 0.0)
+    } else if b_inf {
+        C64::new(-1.0 / a.norm(), 0.0)
+    } else {
+        div(a - b, C64::new((1.0 + a.conj() * b).norm(), 0.0))
+    }
+}
+
 fn div(a: C64, b: C64) -> C64 {
     let (ar, ai, br, bi) = (a.re, a.im, b.re, b.im);
     let (mut x, mut y) = if br.abs() < bi.abs() {
@@ -816,6 +858,41 @@ fn gamma(z: C64) -> C64 {
     }
     let t = z + 7.5;
     (2.0 * PI).sqrt() * ((z + 0.5) * t.ln() - t).exp() * sum
+}
+
+const ZETA_MAX_TERMS: f64 = 1000.0;
+
+fn zeta(s: C64) -> C64 {
+    let one = C64::new(1.0, 0.0);
+    if s.re < 0.0 {
+        let reflected = pow(C64::new(2.0, 0.0), s)
+            * pow(C64::new(PI, 0.0), s - 1.0)
+            * (s * PI / 2.0).sin()
+            * gamma(one - s);
+        return reflected * zeta(one - s);
+    }
+    let terms = (0.89 * s.im.abs() + 21.0).ceil();
+    if !(terms <= ZETA_MAX_TERMS) {
+        return C64::new(f64::NAN, f64::NAN);
+    }
+    let n = terms as usize;
+    let mut term = 1.0;
+    let mut d = Vec::with_capacity(n + 1);
+    d.push(term);
+    for i in 1..=n {
+        let i = i as f64;
+        let n = n as f64;
+        term *=
+            4.0 * (n + i - 1.0) * (n - i + 1.0) / ((2.0 * i) * (2.0 * i - 1.0));
+        d.push(d[d.len() - 1] + term);
+    }
+    let dn = d[n];
+    let mut sum = C64::new(0.0, 0.0);
+    for k in 0..n {
+        let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
+        sum += sign * (d[k] - dn) * (-s * ((k + 1) as f64).ln()).exp();
+    }
+    div(-sum / dn, one - pow(C64::new(2.0, 0.0), one - s))
 }
 
 fn as_i32(v: f64) -> Option<i32> {
@@ -908,30 +985,13 @@ impl Compiler {
     ) -> Result<(Range<usize>, Option<Range<usize>>)> {
         let tokens = to_paren_tokens(&tokenize(raw)?)?;
         let postfix = to_postfix(insert_operators(paren_to_exprs(tokens)?));
-        if self.mode != Mode::Distance {
-            let (operand, complement) = match self.compile_item(postfix)? {
-                Item::Chain(args) if args.len() == 2 && self.poles => {
-                    let operand = self.eq(args, true);
-                    let start = operand.range.start;
-                    (operand, Some(start + 1..start + 2))
-                }
-                item => (self.value(item), None),
-            };
-            self.depth = self.depth.max(operand.depth);
-            let start = operand.range.start;
-            let zeros = if complement.is_some() {
-                start..start + 1
-            } else {
-                operand.range
-            };
-            return Ok((zeros, complement));
-        }
         let mut operand = self.compile(postfix)?;
-        let (sharpness, poles) = (self.sharpness, self.poles);
+        let (mode, sharpness, poles) = (self.mode, self.sharpness, self.poles);
         let scratch = self.alloc(2);
         let arg = operand.range.clone();
         operand = self.emit(2, &[&operand], |dst| Inst::Final {
             arg,
+            mode,
             sharpness,
             poles,
             scratch,
@@ -1007,39 +1067,28 @@ impl Compiler {
     fn value(&mut self, item: Item) -> Operand {
         match item {
             Item::Value(operand) => operand,
-            Item::Chain(args)
-                if args.len() == 2 && self.mode == Mode::Distance =>
-            {
+            Item::Chain(args) if args.len() == 2 => {
+                let op = match self.mode {
+                    Mode::Distance => BinOp::SphereDiff,
+                    Mode::Quotient => BinOp::Quotient,
+                    Mode::Plain => BinOp::Sub,
+                };
                 let (a, b) = (args[0].range.clone(), args[1].range.clone());
                 self.emit(a.len() * b.len(), &[&args[0], &args[1]], |dst| {
-                    Inst::Bin {
-                        op: BinOp::Sub,
-                        a,
-                        b,
-                        dst,
-                    }
+                    Inst::Bin { op, a, b, dst }
                 })
             }
-            Item::Chain(args) => self.eq(args, false),
+            Item::Chain(args) => {
+                let ranges = args.iter().map(|a| a.range.clone()).collect();
+                let inputs: Vec<&Operand> = args.iter().collect();
+                let mode = self.mode;
+                self.emit(1, &inputs, |dst| Inst::Spread {
+                    args: ranges,
+                    mode,
+                    dst,
+                })
+            }
         }
-    }
-
-    fn eq(&mut self, args: Vec<Operand>, complement: bool) -> Operand {
-        let ranges = args.iter().map(|a| a.range.clone()).collect();
-        let inputs: Vec<&Operand> = args.iter().collect();
-        let (sharpness, mode) = (self.sharpness, self.mode);
-        let scratch = self.alloc(1);
-        let outputs = if complement { 2 } else { 1 };
-        let mut operand = self.emit(outputs, &inputs, |dst| Inst::Eq {
-            args: ranges,
-            mode,
-            sharpness,
-            complement,
-            scratch,
-            dst,
-        });
-        operand.depth += 1;
-        operand
     }
 
     fn pop(&mut self, stack: &mut Vec<Item>) -> Result<Operand> {
@@ -1048,11 +1097,6 @@ impl Compiler {
     }
 
     fn compile(&mut self, postfix: Vec<Expr>) -> Result<Operand> {
-        let item = self.compile_item(postfix)?;
-        Ok(self.value(item))
-    }
-
-    fn compile_item(&mut self, postfix: Vec<Expr>) -> Result<Item> {
         let mut stack: Vec<Item> = Vec::new();
         for expr in postfix {
             if let Expr::Op(Op::Eq) = expr {
@@ -1149,7 +1193,7 @@ impl Compiler {
                 Expected another operator"
             ));
         }
-        stack.pop().ok_or_else(missing)
+        self.pop(&mut stack)
     }
 
     fn variable(&mut self, name: &str) -> Result<Operand> {
@@ -1190,6 +1234,11 @@ impl Compiler {
             "floor" => Some(UnOp::Floor),
             "round" => Some(UnOp::Round),
             "gamma" => Some(UnOp::Gamma),
+            "zeta" => Some(UnOp::Zeta),
+            "re" => Some(UnOp::Re),
+            "im" => Some(UnOp::Im),
+            "conj" => Some(UnOp::Conj),
+            "arg" => Some(UnOp::Arg),
             _ => None,
         };
         match name {
@@ -1212,7 +1261,7 @@ impl Compiler {
                 if args.len() != 2 {
                     return Err(incorrect());
                 }
-                let (a, b) = (&args[0], &args[1]);
+                let (a, b) = (&args[1], &args[0]);
                 let n = a.range.len() * b.range.len();
                 let (ra, rb) = (a.range.clone(), b.range.clone());
                 Ok(self.emit(n, &[a, b], |dst| Inst::Bin {
@@ -1223,7 +1272,7 @@ impl Compiler {
                 }))
             }
             "max" | "min" => {
-                if args.is_empty() {
+                if args.len() != 2 {
                     return Err(incorrect());
                 }
                 let ranges = args.iter().map(|a| a.range.clone()).collect();
@@ -1234,12 +1283,25 @@ impl Compiler {
                     dst,
                 }))
             }
-            "nrt" => Err(anyhow!(
-                "The operation 'Nth Root' is not supported for the type Complex"
-            )),
-            "atant" => Err(anyhow!(
-                "The operation 'Atan2' is not supported for the type Complex"
-            )),
+            "root" => {
+                if args.len() != 2 {
+                    return Err(incorrect());
+                }
+                let n = self.integer(&args[0]).filter(|&n| n > 0).ok_or_else(
+                    || {
+                        anyhow!(
+                            "root's degree must be a positive integer constant"
+                        )
+                    },
+                )? as usize;
+                let a = &args[1];
+                let r = a.range.clone();
+                Ok(self.emit(n * r.len(), &[a], |dst| Inst::Root {
+                    a: r,
+                    n,
+                    dst,
+                }))
+            }
             _ => Err(anyhow!("Function '{}' is not defined", name)),
         }
     }

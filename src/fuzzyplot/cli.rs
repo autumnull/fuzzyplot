@@ -153,14 +153,40 @@ pub struct Cli {
     generally optional in obvious places. Available symbols are:
     · Operators [ +, -, *, /, ^ ] - e.g. (-x)^3
     · Trig [sin, cos, tan, asin, acos, atan] - e.g. sin(x)
-    · Misc - sqrt(n), abs(n), log(n, base), gamma(n)
+    · Misc - sqrt x, root n x, abs x, log n x, gamma x, zeta x, max a b, min a b
+    · Complex parts [re, im, conj, arg] - e.g. arg(x + i y)
     · Constants [e, i, pi, tau] - e.g. 2 + 3i
     */
     // allows e.g. "-r=t"
     #[arg(
-        required = true,
+        required_unless_present = "random",
+        conflicts_with = "random",
         num_args = 1..=3,
         verbatim_doc_comment
     )]
     pub equations: Vec<String>,
+    /** Plot N randomly generated equations
+
+    Each generated equation is printed so that it can be plotted again.
+    */
+    #[arg(
+        short = 'R',
+        long,
+        value_name = "N",
+        num_args = 0..=1,
+        default_missing_value = "1",
+        value_parser = clap::value_parser!(u8).range(1..=3),
+        verbatim_doc_comment
+    )]
+    pub random: Option<u8>,
+    /** Mean number of operations in a random equation [default: 4]
+     */
+    #[arg(
+        short,
+        long,
+        default_value = "4",
+        hide_default_value = true,
+        verbatim_doc_comment
+    )]
+    pub length: f64,
 }

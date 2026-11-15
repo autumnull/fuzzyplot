@@ -66,7 +66,53 @@ By default, `fuzzyplot` divides the difference in the equation by the magnitude 
 ![](images/flower.png)
 
 `fuzzyplot "1/sin (y+1 = sin x^2) + tan r" -z -3`
+
 ![](images/vibrations.png)
+
+`fuzzyplot "gamma(abs(asin(sqrt(sin(asin(sin(r))))))) = (2 / t)" -A -z -4`
+
+![](images/swirl.png)
+
+`fuzzyplot "acos 3r = gamma(3 / (2 sqrt -y))" -A`
+
+![](images/sunset.png)
 
 ![](images/eqn8.svg)
 
+`fuzzyplot "abs x ^ tan r" -A -z -3`
+
+![](images/bullet.png)
+
+`fuzzyplot "y = abs(2 ^ (8i*r) - r)" -A -z -3`
+
+![](images/ripple.png)
+
+`fuzzyplot "tan(pi - abs(t ^ (x - t)))" -A -z -3`
+![](images/alias.png)
+
+`acos((3 * sin((y + gamma(x))))) = gamma(tan(y))`
+![](images/barcodes.png)
+
+`fuzzyplot "(abs sqrt (atan 2 = y) + sqrt(y * t)) = abs sin x" -A -z -5`
+
+![](images/spires.png)
+
+`(r * (5 = r)) - t`
+
+![](images/portal.png)
+
+`sin t^2 = tan(abs i + r)`
+
+![](images/apple.png)
+
+`gamma cos(tan r - abs(5 / y))`
+
+![](images/peephole.png)
+
+`sin abs(gamma t * t = r + t)`
+
+![](images/surf.png)
+
+`abs((tan(pi = 1) = y) + (tan(r - x) - pi))`
+
+![](images/warp.png)
