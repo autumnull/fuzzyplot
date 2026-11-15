@@ -36,16 +36,6 @@ fn main() -> Result<()> {
     let tile_width = TILE + 2 * halo;
     let lanes = tile_width * tile_width;
 
-    let layers: Vec<Vec<_>> = plots
-        .iter()
-        .map(|plot| {
-            let poles = plot.poles.clone().map(|p| (p, plot.pole_color));
-            std::iter::once((plot.zeros.clone(), plot.zero_color))
-                .chain(poles)
-                .collect()
-        })
-        .collect();
-
     let mut img = RgbImage::new(width, height);
     let row_len = width as usize * 3;
     let strips = Mutex::new(img.chunks_mut(TILE * row_len).enumerate());
@@ -114,13 +104,12 @@ fn main() -> Result<()> {
                             }
                         }
 
-                        for ((plot, scratch), layers) in
-                            plots.iter().zip(&mut scratches).zip(&layers)
+                        for (plot, scratch) in plots.iter().zip(&mut scratches)
                         {
                             let count =
                                 setup::context_count(plot, contexts[0].len());
                             let mut intensities =
-                                vec![0.0_f64; core.len() * layers.len()];
+                                vec![[0.0_f64; 2]; core.len()];
                             for i in 0..count {
                                 for (lane, contexts) in
                                     contexts.iter().enumerate()
@@ -132,12 +121,13 @@ fn main() -> Result<()> {
                                     );
                                 }
                                 plot.program.eval(scratch);
-                                for (&(lane, _), intensities) in core
-                                    .iter()
-                                    .zip(intensities.chunks_mut(layers.len()))
+                                for (&(lane, _), intensities) in
+                                    core.iter().zip(&mut intensities)
                                 {
-                                    for ((range, _), intensity) in
-                                        layers.iter().zip(intensities)
+                                    let ranges = std::iter::once(&plot.zeros)
+                                        .chain(&plot.poles);
+                                    for (range, intensity) in
+                                        ranges.zip(intensities)
                                     {
                                         for value in plot.program.results(
                                             scratch,
@@ -152,21 +142,11 @@ fn main() -> Result<()> {
                                     }
                                 }
                             }
-                            for (&(_, offset), intensities) in core
-                                .iter()
-                                .zip(intensities.chunks(layers.len()))
+                            for (&(_, offset), &[zero, pole]) in
+                                core.iter().zip(&intensities)
                             {
                                 let pixel = &mut strip[offset..offset + 3];
-                                for ((_, color), intensity) in
-                                    layers.iter().zip(intensities)
-                                {
-                                    for (value, filter) in
-                                        pixel.iter_mut().zip(color)
-                                    {
-                                        let amount = intensity * (1.0 - filter);
-                                        *value -= (amount as u8).min(*value);
-                                    }
-                                }
+                                ink(pixel, plot.color, zero, pole);
                             }
                         }
                     }
@@ -179,4 +159,11 @@ fn main() -> Result<()> {
         format!("Couldn't save file '{}'", args.outfile.display())
     })?;
     Ok(())
+}
+
+fn ink(pixel: &mut [u8], color: [f64; 3], zero: f64, pole: f64) {
+    for (value, filter) in pixel.iter_mut().zip(color) {
+        let amount = zero * (1.0 - filter) + pole * filter;
+        *value -= (amount as u8).min(*value);
+    }
 }

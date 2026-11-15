@@ -61,9 +61,11 @@ By default, `fuzzyplot` divides the difference in the equation by the magnitude 
 
 `fuzzyplot` supports up to 3 equations per image, passed as arguments one after the other. When only 1 equation is given, it is colored red, but if 2 or 3 are given, they are colored cyan, magenta, yellow, in that order. The colors mix together like colored filters.
 
-`fuzzyplot "±r=sin(t)" "±r=sin(t+2pi/3)" "±r=sin(t+4pi/3)" -A`
+`fuzzyplot "r=sin(t-pi/3)" "r=sin t" "r=sin(t+pi/3)" -A -q`
 
 ![](images/flower.png)
+
+![](images/eqn8.svg)
 
 `fuzzyplot "1/sin (y+1 = sin x^2) + tan r" -z -3`
 
@@ -76,8 +78,6 @@ By default, `fuzzyplot` divides the difference in the equation by the magnitude 
 `fuzzyplot "acos 3r = gamma(3 / (2 sqrt -y))" -A`
 
 ![](images/sunset.png)
-
-![](images/eqn8.svg)
 
 `fuzzyplot "abs x ^ tan r" -A -z -3`
 

@@ -167,8 +167,7 @@ pub fn make_plots(
             program: compiler.finish(),
             zeros,
             poles,
-            zero_color: hue(angle),
-            pole_color: hue(angle + 180.0),
+            color: hue(angle),
         };
         plots.push(plot);
     }

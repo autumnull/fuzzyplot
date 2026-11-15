@@ -640,9 +640,8 @@ impl Inst {
             } => {
                 let (src, rest) = buf.split_at_mut(scratch * lanes);
                 let src = &*src;
-                let (spreads, rest) = rest.split_at_mut(2 * lanes);
-                let (zero_spreads, pole_spreads) = spreads.split_at_mut(lanes);
-                let out = &mut rest[(dst - scratch - 2) * lanes..][..2 * lanes];
+                let (norms, rest) = rest.split_at_mut(lanes);
+                let out = &mut rest[(dst - scratch - 1) * lanes..][..2 * lanes];
                 let (zeros, pole_out) = out.split_at_mut(lanes);
                 for out in zeros.iter_mut().chain(pole_out.iter_mut()) {
                     *out = C64::new(f64::INFINITY, 0.0);
@@ -666,23 +665,20 @@ impl Inst {
                         continue;
                     }
                     for lane in 0..lanes {
-                        let p = project(src[slot * lanes + lane]);
-                        let zero = [p, project(C64::new(0.0, 0.0))];
-                        zero_spreads[lane] = C64::new(
-                            sphere_spread(IntoIterator::into_iter(zero), 2.0),
-                            0.0,
-                        );
-                        let pole = [p, [0.0, 0.0, 1.0]];
-                        pole_spreads[lane] = C64::new(
-                            sphere_spread(IntoIterator::into_iter(pole), 2.0),
-                            0.0,
-                        );
+                        let n2 = src[slot * lanes + lane].norm_sqr();
+                        norms[lane] = C64::new(n2, 0.0);
                     }
                     for lane in 0..lanes {
-                        let d = pixel_distance(zero_spreads, width, lane);
+                        let (zero, pole) = spreads(norms[lane].re);
+                        let slope = if zero <= pole {
+                            slope(norms, width, lane, |n2| spreads(n2).0)
+                        } else {
+                            slope(norms, width, lane, |n2| spreads(n2).1)
+                        };
+                        let d = pixel_distance(zero, slope);
                         zeros[lane].re = zeros[lane].re.min(d);
                         if *poles {
-                            let d = pixel_distance(pole_spreads, width, lane);
+                            let d = pixel_distance(pole, slope);
                             pole_out[lane].re = pole_out[lane].re.min(d);
                         }
                     }
@@ -699,31 +695,32 @@ fn closeness(distance: f64, sharpness: f64) -> C64 {
     C64::new(((distance * sharpness).powi(2) + 1.0).powi(-1), 0.0)
 }
 
-fn sphere_spread(
-    points: impl Iterator<Item = [f64; 3]> + Clone,
-    n: f64,
-) -> f64 {
-    let mut mean = [0.0; 3];
-    for p in points.clone() {
-        for (m, p) in mean.iter_mut().zip(p) {
-            *m += p / n;
-        }
+fn spreads(n2: f64) -> (f64, f64) {
+    if n2.is_finite() {
+        (2.0 * n2 / (n2 + 1.0), 2.0 / (n2 + 1.0))
+    } else {
+        (2.0, 0.0)
     }
-    points
-        .map(|p| (0..3).map(|i| (p[i] - mean[i]).powi(2)).sum::<f64>())
-        .sum()
 }
 
-fn pixel_distance(spreads: &[C64], width: usize, lane: usize) -> f64 {
-    let at = |x: usize, y: usize| spreads[y * width + x].re;
+fn slope(
+    norms: &[C64],
+    width: usize,
+    lane: usize,
+    spread: impl Fn(f64) -> f64,
+) -> f64 {
+    let at = |x: usize, y: usize| spread(norms[y * width + x].re);
     let (x, y) = (lane % width, lane / width);
-    let s = at(x, y);
     let gx = at((x + 1).min(width - 1), y) - at(x.saturating_sub(1), y);
     let gy = at(x, (y + 1).min(width - 1)) - at(x, y.saturating_sub(1));
-    if s == 0.0 {
+    gx.hypot(gy)
+}
+
+fn pixel_distance(spread: f64, slope: f64) -> f64 {
+    if spread == 0.0 {
         0.0
     } else {
-        4.0 * s / gx.hypot(gy)
+        4.0 * spread / slope
     }
 }
 
@@ -770,7 +767,8 @@ fn project(z: C64) -> [f64; 3] {
 }
 
 fn sphere_difference(a: C64, b: C64) -> C64 {
-    let (a_inf, b_inf) = (a.is_infinite(), b.is_infinite());
+    let inf = |z: C64| z.re.is_infinite() || z.im.is_infinite();
+    let (a_inf, b_inf) = (inf(a), inf(b));
     if a == b || (a_inf && b_inf) {
         C64::new(0.0, 0.0)
     } else if a_inf {
@@ -987,7 +985,7 @@ impl Compiler {
         let postfix = to_postfix(insert_operators(paren_to_exprs(tokens)?));
         let mut operand = self.compile(postfix)?;
         let (mode, sharpness, poles) = (self.mode, self.sharpness, self.poles);
-        let scratch = self.alloc(2);
+        let scratch = self.alloc(1);
         let arg = operand.range.clone();
         operand = self.emit(2, &[&operand], |dst| Inst::Final {
             arg,

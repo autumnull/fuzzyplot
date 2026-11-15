@@ -11,8 +11,7 @@ pub struct Plot {
     pub program: expr::Program,
     pub zeros: Range<usize>,
     pub poles: Option<Range<usize>>,
-    pub zero_color: [f64; 3],
-    pub pole_color: [f64; 3],
+    pub color: [f64; 3],
 }
 
 #[derive(Debug)]
